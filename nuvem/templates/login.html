@@ -1,0 +1,36 @@
+<!--
+  nuvem/templates/login.html — tela de login do Sentinela Monitor na nuvem.
+  Onde roda: navegador da família. Servida pelo nuvem/app.py (T-140) em /app/login.
+  Conexões: o POST vai para /app/login (função check_user do app.py); o marcador de erro
+  entre chaves duplas é trocado pelo app.py por uma mensagem ou por vazio (str.replace,
+  não é Jinja).
+-->
+<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sentinela da Vida — Entrar</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- Estilo próprio (tema escuro fixo, mesma identidade visual do site-index.html) -->
+<style>
+:root{--bg:#050e1e;--surface:#0a1c34;--fg:#dbeeff;--muted:#7392b6;--accent:#35d0ff;--line:rgba(53,208,255,.22)}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"IBM Plex Sans",system-ui,sans-serif;background:radial-gradient(900px 600px at 50% 30%,#0c2544,transparent 60%),var(--bg);color:var(--fg);min-height:100dvh;display:grid;place-items:center;padding:16px}
+/* cartão do formulário centralizado */
+form{width:100%;max-width:360px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:28px 26px}
+h1{font-size:1.15rem;font-weight:600;letter-spacing:.04em;margin-bottom:4px}
+p.s{color:var(--muted);font-size:.85rem;margin-bottom:20px}
+label{display:block;font-size:.78rem;color:var(--muted);margin:12px 0 5px;letter-spacing:.04em;text-transform:uppercase}
+/* campos, botão, mensagem de erro e rodapé */
+input{width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--line);background:#071529;color:var(--fg);font:inherit}
+input:focus{outline:none;border-color:var(--accent)}
+button{width:100%;margin-top:20px;padding:12px;border:0;border-radius:8px;background:var(--accent);color:#04111f;font:inherit;font-weight:600;cursor:pointer}
+.err{color:#ff8a8a;font-size:.85rem;margin-top:10px}
+.foot{margin-top:18px;font-size:.72rem;color:var(--muted);text-align:center}
+</style></head><body>
+<!-- Os campos 'username' e 'password' casam com os parâmetros Form da rota POST /app/login -->
+<form method="post" action="/app/login" autocomplete="on">
+<h1>Sentinela da Vida</h1><p class="s">Acesso ao Sentinela Monitor</p>
+<label for="u">Usuário</label><input id="u" name="username" required autocapitalize="none" autofocus>
+<label for="p">Senha</label><input id="p" name="password" type="password" required>
+{{error}}
+<button type="submit">Entrar</button>
+<p class="foot">Sem câmera, sem microfone. Apenas sinais de presença e movimento.</p>
+</form></body></html>

@@ -1,0 +1,40 @@
+{#
+  app/templates/dispositivos.html — administração dos nós ESP32 cadastrados (perfil ADM).
+  Onde roda: renderizado por app/main.py (rotas /dispositivos) e exibido no navegador.
+  Conexões: estende base.html; recebe 'dispositivos'. Edição via POST /dispositivos/{id};
+  exclusão via POST /dispositivos/{id}/excluir; criação via POST /dispositivos.
+  Alterar o cadastro faz o listener (app/listener.py) reler o mapa node_id -> dispositivo.
+  (Cabeçalho em comentário Jinja porque nada pode ser impresso antes do extends.)
+#}
+{% extends "base.html" %}
+{% block titulo %}Dispositivos · webSentinela{% endblock %}
+{% block conteudo %}
+<h1>Dispositivos</h1>
+<!-- Uma linha por dispositivo; os inputs apontam para o formulário 'dN' do Salvar -->
+<table class="tabela">
+  <thead><tr><th>node_id</th><th>MAC</th><th>Cômodo</th><th>Ativo</th><th></th></tr></thead>
+  <tbody>
+  {% for d in dispositivos %}
+  <tr>
+    <td><input form="d{{ d.id }}" name="node_id" value="{{ d.node_id }}" required pattern="node-\d{1,3}"></td>
+    <td><input form="d{{ d.id }}" name="mac" value="{{ d.mac }}" required></td>
+    <td><input form="d{{ d.id }}" name="comodo" value="{{ d.comodo }}" maxlength="60" placeholder="ex.: Sala"></td>
+    <td><input form="d{{ d.id }}" type="checkbox" name="ativo" value="1" {% if d.ativo %}checked{% endif %}></td>
+    <td class="acoes">
+      <form id="d{{ d.id }}" method="post" action="/dispositivos/{{ d.id }}"><button>Salvar</button></form>
+      <form method="post" action="/dispositivos/{{ d.id }}/excluir" onsubmit="return confirm('Excluir {{ d.node_id }} e todos os seus eventos?')"><button class="perigo">Excluir</button></form>
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<!-- Cadastro de um novo nó ESP32: POST /dispositivos -->
+<h2>Novo dispositivo</h2>
+<form method="post" action="/dispositivos" class="cartao linha">
+  <label>node_id <input name="node_id" required pattern="node-\d{1,3}" placeholder="node-04"></label>
+  <label>MAC <input name="mac" required placeholder="aa:bb:cc:dd:ee:ff"></label>
+  <label>Cômodo <input name="comodo" maxlength="60"></label>
+  <button type="submit">Criar</button>
+</form>
+<p class="nota">O número do <code>node_id</code> (node-01 → 1) precisa bater com o <code>node_id</code> provisionado na NVS do ESP32.</p>
+{% endblock %}

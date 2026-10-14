@@ -1,0 +1,54 @@
+<!--
+  nuvem/templates/painel.html — Painel dos sensores na nuvem (um card por nó ESP32).
+  Onde roda: navegador da família. Servido pelo nuvem/app.py (T-140) em /app/painel,
+  só com login.
+  Conexões: lê /app/api/state a cada 2 s (estado enviado pela casa via cloud_push.py) e
+  /app/api/rooms (para mostrar o cômodo de cada sensor). Página estática: o app.py não
+  faz substituições nela.
+-->
+<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sentinela — Painel</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<!-- Estilo próprio: cards por sensor com barra de energia x ruído -->
+<style>
+:root{--bg:#f4f6f8;--surface:#fff;--fg:#1b2430;--muted:#6b7786;--line:#dde3ea;--accent:#1f6f8b;--ok:#2e9e5b;--warn:#d9931f;--crit:#d64545}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f141a;--surface:#161d26;--fg:#e6edf3;--muted:#8b98a8;--line:#273240}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 "IBM Plex Sans",system-ui,sans-serif;padding:16px}
+header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px}h1{font-size:1.3rem;margin:0}
+nav a{color:var(--accent);text-decoration:none;margin-right:12px;font-weight:500}.sp{flex:1}
+.live{font:500 11px "IBM Plex Mono",monospace;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:6px 10px}
+.live[data-s="ok"]{color:var(--ok);border-color:var(--ok)}.live[data-s="off"]{color:var(--crit);border-color:var(--crit)}
+/* grade de cards; borda esquerda verde = online, vermelha = queda */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.card{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--muted);border-radius:10px;padding:14px}
+.card[data-on="1"]{border-left-color:var(--ok)}.card[data-k="fall"]{border-left-color:var(--crit)}
+.card h2{font:600 1rem "IBM Plex Mono",monospace;margin:0;display:flex;justify-content:space-between}.card h2 small{font:500 11px "IBM Plex Mono",monospace;color:var(--muted);letter-spacing:.06em}
+.card .room{color:var(--muted);font-size:.9rem;margin:2px 0 8px}
+.card dl{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;margin:0;font-size:.9rem}.card dt{color:var(--muted)}.card dd{margin:0;text-align:right;font-family:"IBM Plex Mono",monospace}
+/* barra: energia atual (preenchimento) e limiar ruído + 0,12 (marcador) */
+.bar{height:6px;background:var(--line);border-radius:3px;margin-top:8px;position:relative;overflow:hidden}.bar i{position:absolute;left:0;top:0;bottom:0;background:var(--accent)}.bar b{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--warn)}
+</style></head><body>
+<header><h1>Sentinela da Vida · Painel</h1><nav><a href="/app/monitor">Monitor</a><a href="/app/painel">Painel</a><a href="/app/logout">sair</a></nav><span class="sp"></span><span class="live" id="live" data-s="wait">conectando…</span></header>
+<!-- Cards preenchidos pelo script abaixo -->
+<div class="grid" id="grid"></div>
+<script>
+// Referências e planta (para mostrar o cômodo de cada sensor).
+const grid=document.getElementById("grid"), live=document.getElementById("live"); let rooms=[];
+// Nome(s) do(s) cômodo(s) que usam o sensor, pela planta de /app/api/rooms.
+const roomOf=id=>rooms.filter(r=>(r.nodes&&r.nodes.length?r.nodes:[r.node]).includes(id)).map(r=>r.name).join(", ")||"(cômodo não definido)";
+// A cada 2 s: lê /app/api/state, classifica a idade dos dados e redesenha um card por nó
+// (online se visto há até 120 s; movimento se energia > ruído + 0,12; queda pelo latch do servidor).
+async function poll(){ try{ const res=await fetch("/app/api/state",{cache:"no-store"}); if(res.status===401){ location.href="/app/login"; return; }
+  const st=JSON.parse((await res.text()).replace(/\b(NaN|-?Infinity)\b/g,"0")); const age=st.age!=null?st.age:9999, now=st.now||Date.now()/1000;
+  live.dataset.s=!st.ts?"wait":age>120?"off":"ok"; live.textContent=!st.ts?"aguardando a casa":age>120?`casa sem envio há ${Math.round(age/60)} min`:"ao vivo";
+  grid.innerHTML=""; Object.entries(st.nodes||{}).sort().forEach(([id,n])=>{ const on=(now-(n.last_seen||0))<=120; const d=document.createElement("div"); d.className="card"; d.dataset.on=on?1:0; if(n.fall) d.dataset.k="fall";
+    const mov=(n.energy||0)>(n.baseline||0)+0.12; const est=!on?"offline":n.fall?"QUEDA":mov?"movimento":"sem movimento";
+    const t=n.last_seen?new Date(n.last_seen*1000).toLocaleTimeString("pt-BR"):"—";
+    d.innerHTML=`<h2>${id}<small>${on?"ONLINE":"OFFLINE"}</small></h2><div class="room">${roomOf(id)}</div>
+      <dl><dt>Estado</dt><dd>${est}</dd><dt>Energia</dt><dd>${n.energy!=null?n.energy.toFixed(2):"—"}</dd><dt>Ruído</dt><dd>${n.baseline!=null?n.baseline.toFixed(2):"—"}</dd>
+      ${n.rssi!=null?`<dt>RSSI</dt><dd>${n.rssi} dBm</dd>`:""}<dt>Última leitura</dt><dd>${t}</dd></dl>
+      <div class="bar"><i style="width:${Math.round((n.energy||0)*100)}%"></i><b style="left:${Math.round(((n.baseline||0)+0.12)*100)}%"></b></div>`; grid.appendChild(d); });
+ }catch(e){ live.dataset.s="off"; live.textContent="sem conexão"; } }
+// Inicialização: carrega a planta e inicia o polling.
+(async()=>{ try{ rooms=await (await fetch("/app/api/rooms")).json(); }catch(e){} poll(); setInterval(poll,2000); })();
+</script></body></html>

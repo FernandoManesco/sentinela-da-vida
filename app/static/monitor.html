@@ -1,0 +1,685 @@
+<!--
+  app/static/monitor.html — Sentinela Monitor: planta da casa ao vivo (cena isométrica em
+  CSS 3D), editor de cômodos/móveis e modo de demonstração.
+  Onde roda: navegador. Servido pelo webSentinela do notebook em /monitor (sem login, só
+  rede local). No T-140 existe a variante nuvem/static/monitor.html, gerada por
+  nuvem/build_monitor.py, que usa os caminhos /app/api/... e exige login.
+  Conexões: GET /api/state a cada 2 s (estado dos nós, função estado_monitor de
+  app/main.py) e GET/PUT /api/rooms (planta guardada em rooms.json). Nenhuma imagem é
+  capturada: a figura é uma representação do que os sensores detectam (presença,
+  movimento, queda).
+  Organização do arquivo: style (CSS por seção), HTML (cabeçalho, monitor, demonstração,
+  editor, rodapé) e script (catálogo de móveis, grade de 25 cm e rota BFS, cena 3D e
+  renderStage, corpo deitado 3D, demonstração, câmera, tema, editor 2D, modo ao vivo).
+-->
+<title>Sentinela Monitor</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+  /* Layout: monitor clínico. Cômodo em foco como caixa isométrica (CSS 3D) em neutros frios; silhueta humana neutra; uma cor de estado. Lista de cômodos ao lado; editor 2D visto de cima. */
+  /* Tokens de cor (tema claro): fundo, piso, paredes, móveis, figura e as três cores de estado (ok / atenção / queda) */
+  :root{
+    --bg:#f3f5f7; --surface:#ffffff; --fg:#1c2430; --muted:#66707d; --line:#d9dee5;
+    --floor:#e9edf1; --floor-line:#d4dae1; --wall:#f7f9fb; --wall-edge:#cfd6de;
+    --furn:#ffffff; --furn-side:#dfe4ea; --furn-top:#f4f6f8; --furn-text:#4b5563;
+    --figure:#4a5563; --figure-side:#343c48;
+    --accent:#1f6f8b;
+    --ok:#2f9e6b; --ok-bg:#e6f5ee; --warn:#d98a1a; --warn-bg:#fdf1dd; --crit:#cf3b3b; --crit-bg:#fbe5e5;
+    --font:"IBM Plex Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,monospace;
+  }
+  /* Tema escuro: automático pelo sistema, ou forçado por data-theme (botão de tema no cabeçalho) */
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+    --bg:#121619; --surface:#1a1f24; --fg:#e8ecf0; --muted:#98a2ad; --line:#2b333b;
+    --floor:#242b32; --floor-line:#2f3840; --wall:#1e252b; --wall-edge:#3a444e;
+    --furn:#3a434d; --furn-side:#2a3138; --furn-top:#454f5a; --furn-text:#c8d0d8;
+    --figure:#c3ccd6; --figure-side:#8e99a5;
+    --ok-bg:#1b3a2c; --warn-bg:#3d2d12; --crit-bg:#3f1f1f; color-scheme:dark } }
+  :root[data-theme="dark"]{
+    --bg:#121619; --surface:#1a1f24; --fg:#e8ecf0; --muted:#98a2ad; --line:#2b333b;
+    --floor:#242b32; --floor-line:#2f3840; --wall:#1e252b; --wall-edge:#3a444e;
+    --furn:#3a434d; --furn-side:#2a3138; --furn-top:#454f5a; --furn-text:#c8d0d8;
+    --figure:#c3ccd6; --figure-side:#8e99a5;
+    --ok-bg:#1b3a2c; --warn-bg:#3d2d12; --crit-bg:#3f1f1f; color-scheme:dark }
+
+  /* Base da página e cabeçalho (marca, abas Monitor / Ambiente) */
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font);line-height:1.5;font-size:14px}
+  .wrap{max-width:1180px;margin:0 auto;padding-block:16px 28px;padding-inline:16px}
+
+  header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 20px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+  .brand{display:flex;flex-direction:column}
+  .brand .eyebrow{font-size:.7rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+  .brand h1{font-size:1.15rem;font-weight:600;margin:0;letter-spacing:-.01em}
+  .brand h1 span{color:var(--muted);font-weight:400}
+  .tabs{display:flex;gap:2px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:3px}
+  .tabs button{border:0;background:transparent;box-shadow:none;padding:6px 14px;border-radius:6px;font-weight:600;color:var(--muted)}
+  .tabs button[aria-selected="true"]{background:var(--accent);color:#fff}
+
+  /* modo */
+  .mode{display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:8px;background:var(--surface);border:1px solid var(--line);margin-bottom:14px}
+  .mode .k{font-weight:600;padding:3px 10px;border-radius:6px;font-size:.82rem;letter-spacing:.02em}
+  .mode[data-m="alone"] .k{background:var(--ok-bg);color:var(--ok)}
+  .mode[data-m="company"] .k{background:var(--line);color:var(--fg)}
+  .mode[data-m="none"] .k{background:var(--line);color:var(--muted)}
+  .mode .d{color:var(--muted);font-size:.86rem}
+  .mode .n{margin-left:auto;font-family:var(--mono);font-size:.76rem;color:var(--muted)}
+
+  /* Área do monitor: palco 3D à esquerda, lista de cômodos à direita */
+  .view{display:grid;grid-template-columns:1fr 240px;gap:16px;align-items:start}
+  @media (max-width:860px){.view{grid-template-columns:1fr}}
+  .stage{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 16px 14px;display:flex;flex-direction:column;align-items:center;gap:10px;min-width:0;overflow:hidden}
+  .stage-head{width:100%;display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+  .stage-head h2{margin:0;font-size:1rem;font-weight:600}
+  .stage-head .meta{font-family:var(--mono);font-size:.74rem;color:var(--muted)}
+
+  /* ---------- cena isométrica ---------- */
+  .scene{position:relative;width:100%;display:flex;justify-content:center;align-items:center;min-height:300px;perspective:1600px;--tilt:58deg;--spin:-40deg;cursor:grab;touch-action:none;user-select:none}
+  .cam{position:absolute;right:6px;top:6px;display:flex;gap:4px;z-index:5}
+  .cam button{width:30px;height:28px;padding:0;font-size:13px;line-height:1;border:1px solid var(--line);background:var(--surface);color:var(--muted);border-radius:6px;cursor:pointer}
+  .cam button:hover{color:var(--fg);border-color:var(--accent)}
+  .iso{position:relative;transform-style:preserve-3d;transform:rotateX(var(--tilt)) rotateZ(var(--spin));transition:transform .4s ease}
+  /* piso com grade de 40 px; a borda muda de cor em atenção (warn) e queda (crit) */
+  .floor{position:absolute;inset:0;background:var(--floor);border:1px solid var(--floor-line);
+    background-image:linear-gradient(var(--floor-line) 1px,transparent 1px),linear-gradient(90deg,var(--floor-line) 1px,transparent 1px);background-size:40px 40px;transition:background .4s,box-shadow .4s}
+  .floor.warn{box-shadow:inset 0 0 0 3px var(--warn)}
+  .floor.crit{background-color:var(--crit-bg);box-shadow:inset 0 0 0 3px var(--crit)}
+  /* paredes de fundo: baixas e translúcidas — delimitam o cômodo, mas nunca escondem a figura */
+  .wall{position:absolute;background:var(--wall);border:1px solid var(--wall-edge);transform-origin:top left;opacity:.45;pointer-events:none}
+  .wall.back{left:0;top:0;width:100%;height:var(--wh);transform:rotateX(-90deg) translateY(calc(-1 * var(--wh)))}
+  .wall.left{left:0;top:0;width:var(--wh);height:100%;transform:rotateY(90deg) translateX(calc(-1 * var(--wh)))}
+  /* porta: vão na parede, desenhado no piso como soleira + batente */
+  .door{position:absolute;transform-style:preserve-3d}
+  .door .sill{position:absolute;inset:0;background:var(--accent);opacity:.25;border:1px dashed var(--accent)}
+  .door .lbl{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:.56rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);white-space:nowrap}
+  .door .jamb{position:absolute;width:6px;height:100%;top:0;background:var(--wall-edge);transform-origin:bottom;transform:rotateX(-90deg) translateY(calc(-1 * var(--dh)));height:var(--dh)}
+  .door .jamb.a{left:0}.door .jamb.b{right:0}
+
+  /* móvel como caixa 3D: top + duas faces */
+  /* móvel = caixa 3D: top + 4 faces laterais giradas a partir da altura --fh; .body3 reaproveita a caixa para o corpo deitado */
+  .f3{position:absolute;transform-style:preserve-3d}
+  .body3 .top,.body3 .side,.body3 .side2,.body3 .side3,.body3 .side4{background:var(--figure)!important;border-color:rgba(0,0,0,.18)!important}
+  .body3 .side,.body3 .side3{filter:brightness(.82)} .body3 .side2,.body3 .side4{filter:brightness(.9)}
+  .body3.head .top{border-radius:50%} .body3.head .side,.body3.head .side2,.body3.head .side3,.body3.head .side4{border-radius:40%}
+  .body3.crit .top,.body3.crit .side,.body3.crit .side2,.body3.crit .side3,.body3.crit .side4{background:var(--crit)!important}
+  .body3 .top{animation:br3 3.8s ease-in-out infinite}
+  @keyframes br3{0%,100%{transform:translateZ(var(--fh))}50%{transform:translateZ(calc(var(--fh) + 2px))}}
+  .f3 .top{position:absolute;inset:0;background:var(--furn-top);border:1px solid var(--furn-side);transform:translateZ(var(--fh));display:flex;align-items:center;justify-content:center;font-size:.58rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--furn-text)}
+  .f3.bed .top{align-items:flex-end;padding-bottom:4px}
+  .f3.bed .pillow{position:absolute;left:14%;right:14%;top:6%;height:15%;border-radius:5px;background:rgba(255,255,255,.42)}
+  .f3.bed .blanket{position:absolute;left:0;right:0;top:40%;bottom:0;background:var(--accent);opacity:.22;border-radius:0 0 3px 3px}
+  .cover{position:absolute;background:var(--accent);opacity:.78;border-radius:3px;pointer-events:none;box-shadow:0 0 0 1px rgba(255,255,255,.25) inset}
+  .f3.bed.vert .pillow{left:6%;right:auto;width:15%;top:14%;height:72%} .f3.bed.vert .blanket{top:0;left:40%;right:0;bottom:0;border-radius:0 3px 3px 0}
+  .f3 .side{position:absolute;left:0;bottom:0;width:100%;height:var(--fh);background:var(--furn-side);transform-origin:bottom;transform:rotateX(-90deg)}
+  .f3 .side2{position:absolute;right:0;top:0;height:100%;width:var(--fh);background:var(--furn);border-left:1px solid var(--furn-side);transform-origin:right;transform:rotateY(90deg)}
+  .f3 .side3{position:absolute;left:0;top:0;width:100%;height:var(--fh);background:var(--furn-side);transform-origin:top;transform:rotateX(90deg)}
+  .f3 .side4{position:absolute;left:0;top:0;height:100%;width:var(--fh);background:var(--furn);border-right:1px solid var(--furn-side);transform-origin:left;transform:rotateY(-90deg)}
+  .f3.round .top{border-radius:50%}
+
+  /* figura humana neutra: billboard dentro da cena — contra-rotação anula o isométrico, então ela fica reta na tela,
+     mas participa da ordem 3D (passa atrás/na frente dos móveis conforme a profundidade) */
+  /* ---------- figura humana (silhueta SVG) e animações: andar, respirar, idle, deitada ---------- */
+  .figs{display:none}
+  .fig{position:absolute;width:30px;height:72px;transform-origin:50% 100%;
+    transform:translate(-50%,-100%) rotateZ(calc(-1*var(--spin))) rotateX(calc(-1*var(--tilt)))}
+  .fig svg{position:absolute;left:0;bottom:0;width:30px;height:72px;overflow:visible;filter:drop-shadow(0 1px 1px rgba(0,0,0,.25))}
+  .fig svg *{fill:var(--figure)}
+  .fig .sh{position:absolute;left:50%;bottom:-5px;width:34px;height:10px;margin-left:-17px;border-radius:50%;background:rgba(0,0,0,.2);filter:blur(1.5px)}
+  .fig.other svg *{fill:var(--figure-side)}
+  .fig.crit svg *{fill:var(--crit)}
+  .fig.walk{transition:left .26s linear,top .26s linear}
+  .fig.walk .gait{animation:bob .52s ease-in-out infinite alternate}
+  .fig.walk .lm{transform-box:fill-box;transform-origin:50% 0;animation:swing 1.04s ease-in-out infinite}
+  .fig.walk .ar,.fig.walk .ll{animation-delay:-.52s}
+  .fig.walk .al,.fig.walk .ar{animation-name:swingArm}
+  @keyframes swing{0%,100%{transform:rotate(26deg)}50%{transform:rotate(-26deg)}}
+  @keyframes swingArm{0%,100%{transform:rotate(-20deg)}50%{transform:rotate(20deg)}}
+  .fig.walk.face-l svg{transform:scaleX(-1)}
+  .fig.walk.pause .gait,.fig.walk.pause .lm{animation-play-state:paused}
+  .fig.walk.pause .lm{animation:none}
+  .idle{transform-box:fill-box;transform-origin:50% 100%;animation:shift 7s ease-in-out infinite}
+  .idle .tr{transform-box:fill-box;transform-origin:50% 100%;animation:chest 3.8s ease-in-out infinite}
+  .idle .hd{transform-box:fill-box;transform-origin:50% 100%;animation:head 3.8s ease-in-out infinite}
+  .idle .al{transform-box:fill-box;transform-origin:50% 0;animation:armL 7s ease-in-out infinite}
+  .idle .ar{transform-box:fill-box;transform-origin:50% 0;animation:armR 7s ease-in-out infinite}
+  @keyframes shift{0%,38%,100%{transform:rotate(0) translateX(0)}50%,88%{transform:rotate(-2.5deg) translateX(1.2px)}}
+  @keyframes chest{0%,100%{transform:scale(1,1)}50%{transform:scale(1.06,1.03)}}
+  @keyframes head{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.2px)}}
+  @keyframes armL{0%,38%,100%{transform:rotate(0)}50%,88%{transform:rotate(6deg)}}
+  @keyframes armR{0%,38%,100%{transform:rotate(0)}50%,88%{transform:rotate(-7deg)}}
+  @keyframes bob{from{transform:translateY(0)}to{transform:translateY(-2px)}}
+  .fig.breathe svg{animation:br 3.8s ease-in-out infinite;transform-origin:50% 100%}
+  @keyframes br{0%,100%{transform:scaleY(1)}50%{transform:scaleY(1.035)}}
+  /* deitado: figura plana sobre o piso/cama (participa da perspectiva do chão), alinhada ao móvel */
+  .fig.flat{width:72px;height:30px;transform-origin:50% 50%;transform:translate(-50%,-50%) rotateZ(var(--rz,0deg)) translateZ(var(--lift,0px))}
+  .fig.flat svg{width:72px;height:30px;transform:none;animation:none}
+  .fig.flat .sh{display:none}
+  /* corpo deitado em volumes 3D (cabeça, tronco, braços, pernas) */
+  .fig3{position:absolute;width:115px;height:36px;transform-style:preserve-3d;transform:translate(-50%,-50%) rotateZ(var(--rz,0deg)) translateZ(var(--lift,0px))}
+  .p3{position:absolute;transform-style:preserve-3d}
+  .p3 div{position:absolute;background:var(--figure-side);border-radius:inherit}
+  .p3 .pt{inset:0;background:var(--figure);transform:translateZ(var(--ph))}
+  .p3 .pa{left:0;bottom:0;width:100%;height:var(--ph);transform-origin:bottom;transform:rotateX(-90deg)}
+  .p3 .pb{left:0;top:0;width:100%;height:var(--ph);transform-origin:top;transform:rotateX(90deg)}
+  .p3 .pl{left:0;top:0;height:100%;width:var(--ph);transform-origin:left;transform:rotateY(-90deg)}
+  .p3 .pr{right:0;top:0;height:100%;width:var(--ph);transform-origin:right;transform:rotateY(90deg)}
+  .p3.head{border-radius:50%} .p3.head div{border-radius:50%}
+  .p3.torso{animation:chest3 3.8s ease-in-out infinite} @keyframes chest3{0%,100%{transform:translateZ(0)}50%{transform:translateZ(2.5px)}}
+  .fig3.crit .p3 .pt{background:var(--crit)} .fig3.crit .p3 div{background:color-mix(in srgb,var(--crit) 70%,#000)} .fig3.crit .p3.torso{animation:none}
+  .fig3 .sh{position:absolute;inset:-4px -6px;border-radius:50%;background:rgba(0,0,0,.25);filter:blur(4px);transform:translateZ(-1px)}
+  .fig.flat.breathe svg{animation:brflat 3.8s ease-in-out infinite;transform-origin:50% 50%}
+  @keyframes brflat{0%,100%{transform:scale(1)}50%{transform:scale(1.035,1.05)}}
+
+  /* Estado do cômodo em foco (pílula + detalhe) e lista lateral de cômodos com selo de estado */
+  .status{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center;width:100%}
+  .pill{font-weight:600;font-size:.74rem;letter-spacing:.06em;text-transform:uppercase;padding:4px 10px;border-radius:6px;border:1px solid var(--line);background:var(--bg)}
+  .status[data-k="empty"] .pill{color:var(--muted)}
+  .status[data-k="ok"] .pill{color:var(--ok);background:var(--ok-bg);border-color:transparent}
+  .status[data-k="warn"] .pill{color:var(--warn);background:var(--warn-bg);border-color:transparent}
+  .status[data-k="fall"] .pill{color:#fff;background:var(--crit);border-color:transparent}
+  .status .detail{color:var(--muted);font-size:.86rem}
+
+  .list{display:flex;flex-direction:column;gap:6px}
+  .list h3{font-size:.7rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.12em;margin:4px 0 2px}
+  .list button{display:flex;justify-content:space-between;align-items:center;gap:8px;text-align:left;padding:9px 12px;background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:none;font-weight:500}
+  .list button[aria-current="true"]{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+  .list .st{font-size:.68rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;padding:2px 7px;border-radius:5px;color:var(--muted);background:var(--bg)}
+  .list .st[data-k="ok"]{color:var(--ok);background:var(--ok-bg)}
+  .list .st[data-k="warn"]{color:var(--warn);background:var(--warn-bg)}
+  .list .st[data-k="fall"]{color:#fff;background:var(--crit)}
+  /* legenda das três cores */
+  .legend{margin-top:10px;display:grid;gap:4px;font-size:.78rem;color:var(--muted)}
+  .legend span{display:flex;align-items:center;gap:7px}.legend i{width:10px;height:10px;border-radius:2px}
+
+  /* ---------- editor ---------- */
+  .editor{display:grid;grid-template-columns:1fr 230px;gap:16px;align-items:start}
+  @media (max-width:860px){.editor{grid-template-columns:1fr}}
+  .ed{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .box2d{position:relative;background:var(--floor);border:1px solid var(--floor-line);max-width:100%;
+    background-image:linear-gradient(var(--floor-line) 1px,transparent 1px),linear-gradient(90deg,var(--floor-line) 1px,transparent 1px);background-size:40px 40px}
+  .furn2d{position:absolute;background:var(--furn);border:1px solid var(--furn-side);border-radius:3px;font-size:.58rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;display:flex;align-items:center;justify-content:center;color:var(--furn-text);cursor:grab;user-select:none}
+  .furn2d:active{cursor:grabbing}.furn2d.sel{outline:2px solid var(--accent);outline-offset:1px}.furn2d.round{border-radius:50%}
+  .furn2d.door{background:transparent;border:1px dashed var(--accent);color:var(--accent)}
+  .palette h3,.fields-h{font-size:.7rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.12em;margin:0 0 8px}
+  .palette .grid{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+  .palette button{padding:6px 7px;font-size:.72rem;font-weight:500;background:var(--bg);border:1px solid var(--line);border-radius:6px;box-shadow:none;text-align:left}
+  .fields{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
+  @media (max-width:600px){.fields{grid-template-columns:1fr 1fr}}
+  .fields label{font-size:.68rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;display:flex;flex-direction:column;gap:3px}
+  .fields input,.fields select{font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)}
+  .roomtabs{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px}
+  .roomtabs button{padding:5px 11px;border-radius:6px;background:var(--surface);border:1px solid var(--line);box-shadow:none;font-weight:500}
+  .roomtabs button[aria-current="true"]{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .hint{font-size:.78rem;color:var(--muted);margin-top:8px}
+
+  /* ---------- demonstração ---------- */
+  .demo{margin-top:16px;background:var(--surface);border:1px dashed var(--line);border-radius:10px;padding:12px 14px;display:grid;grid-template-columns:1fr auto;gap:10px 24px;align-items:start}
+  @media (max-width:760px){.demo{grid-template-columns:1fr}}
+  .demo h2{font-size:.7rem;font-weight:600;margin:0 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:.12em}
+  .btns{display:flex;flex-wrap:wrap;gap:6px}
+  button{font:inherit;font-weight:500;border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:6px 11px;border-radius:6px;cursor:pointer;font-size:.82rem}
+  button:hover{border-color:var(--muted)}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  button.crit{color:var(--crit);border-color:var(--crit)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .log{font-size:.78rem;color:var(--muted);display:grid;gap:3px;min-width:min(100%,300px);font-family:var(--mono)}
+  .log b{color:var(--fg);font-weight:600}.log div{display:flex;gap:10px}.log time{flex:0 0 auto}
+
+  /* Rodapé (aviso de privacidade), utilitários, seletor de sensores do editor e botão de tema */
+  footer{margin-top:16px;padding:10px 12px;border-top:1px solid var(--line);font-size:.8rem;color:var(--muted);display:flex;gap:10px;align-items:flex-start}
+  footer strong{color:var(--fg);font-weight:600}
+  footer .ico{flex:0 0 auto;width:20px;height:20px;border-radius:5px;background:var(--ok);color:#fff;display:grid;place-items:center;font-size:.75rem;font-weight:700}
+  [hidden]{display:none!important}
+  @media (prefers-reduced-motion:reduce){ .fig,.fig *,.floor{animation:none!important;transition:none!important} }
+  .nodes{display:flex;flex-wrap:wrap;gap:6px 10px;padding:6px 0}
+  .nodes label{display:inline-flex;align-items:center;gap:4px;font:500 12px "IBM Plex Mono",monospace;cursor:pointer}
+  .theme{width:34px;height:34px;border:1px solid var(--line);background:var(--surface);color:var(--muted);border-radius:50%;cursor:pointer;font-size:15px;line-height:1}
+  .theme:hover{color:var(--fg);border-color:var(--accent)}
+
+/* ---------- indicador AO VIVO e seletor de fonte (Ao vivo / Simulação), acrescentados pelo build ---------- */
+.live{display:inline-flex;align-items:center;gap:7px;font:500 11px/1 "IBM Plex Mono",monospace;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-left:auto;padding:6px 10px;border:1px solid var(--line);border-radius:999px}
+.live i{width:7px;height:7px;border-radius:50%;background:var(--muted)}
+.live[data-s="ok"] i{background:var(--ok);box-shadow:0 0 6px var(--ok)}
+.live[data-s="old"] i{background:var(--warn)} .live[data-s="off"] i{background:var(--crit)}
+.live[data-s="sim"] i{background:var(--accent)}
+a.out{font:500 12px "IBM Plex Sans",sans-serif;color:var(--muted);text-decoration:none;margin-left:10px}
+.src{display:inline-flex;margin-left:auto;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.src button{border:0;background:transparent;color:var(--muted);font:600 12px "IBM Plex Sans",sans-serif;padding:7px 12px;cursor:pointer}
+.src button[aria-pressed="true"]{background:var(--accent);color:#fff}
+.live{margin-left:0}
+/* em modo ao vivo a seção de demonstração fica oculta */
+body[data-src="live"] section.demo{display:none}
+</style>
+
+<div class="wrap">
+  <!-- Cabeçalho: marca, abas Monitor/Ambiente, fonte de dados, indicador ao vivo, link do painel e tema -->
+  <header>
+    <div class="brand"><span class="eyebrow">Sentinela da Vida · Painel da família</span><h1>Residência <span>· Paciente: Helena M.</span></h1></div>
+    <div class="tabs" role="tablist"><button role="tab" id="tab-view" aria-selected="true">Monitor</button><button role="tab" id="tab-edit" aria-selected="false">Ambiente</button></div><div class="src" role="group"><button id="src-live" aria-pressed="true">Ao vivo</button><button id="src-sim" aria-pressed="false">Simulação</button></div><div class="live" id="live" data-s="wait"><i></i><span id="live-t">conectando…</span></div><a class="out" href="/painel">painel</a><button class="theme" id="theme" title="modo dia / noite">☾</button>
+  </header>
+
+  <!-- Aba Monitor: modo da casa (Sozinha / Acompanhada / Ninguém), palco 3D com câmera, status e lista de cômodos -->
+  <section id="sec-view">
+    <div class="mode" id="mode" data-m="alone"><span class="k">Sozinha</span><span class="d" id="mode-d">vigilância ativa · 1 pessoa detectada</span><span class="n" id="mode-n"></span></div>
+    <div class="view">
+      <div class="stage">
+        <div class="stage-head"><h2 id="rn-name">—</h2><span class="meta" id="rn-meta"></span></div>
+        <div class="scene" id="scene"><div class="cam"><button id="cam-l" title="girar à esquerda">↺</button><button id="cam-r" title="girar à direita">↻</button><button id="cam-up" title="mais de cima">▲</button><button id="cam-dn" title="mais de lado">▼</button></div><div class="iso" id="iso"></div></div>
+        <div class="status" id="stage-status" data-k="empty"><span class="pill">vazio</span><span class="detail">—</span></div>
+      </div>
+      <aside class="list"><h3>Cômodos</h3><div id="roomlist"></div>
+        <div class="legend"><span><i style="background:var(--ok)"></i>tudo bem</span><span><i style="background:var(--warn)"></i>imóvel há muito tempo</span><span><i style="background:var(--crit)"></i>queda</span></div>
+      </aside>
+    </div>
+
+    <!-- Demonstração: botões que simulam cenários (oculta em modo ao vivo) -->
+    <section class="demo">
+      <div><h2>Demonstração</h2>
+        <div class="btns">
+          <button class="primary" id="b-play">▶ Rodar cenário</button>
+          <button data-sim="sala:walk">Movimento na sala</button>
+          <button data-sim="sala:sofa">Sentou no sofá</button>
+          <button data-sim="cozinha:table">Sentou à mesa</button>
+          <button data-sim="quarto:bed">Deitou na cama</button>
+          <button data-sim="banheiro:warn">Imóvel no banheiro 12 min</button>
+          <button class="crit" data-sim="sala:fall">Queda na sala</button>
+          <button data-sim="company">Cuidadora presente</button>
+          <button data-sim="none">Ninguém em casa</button>
+        </div>
+      </div>
+      <div class="log" id="log" aria-live="polite"></div>
+    </section>
+  </section>
+
+  <!-- Aba Ambiente: editor 2D visto de cima (nome, sensores, medidas, móveis arrastáveis) -->
+  <section id="sec-edit" hidden>
+    <div class="editor">
+      <div class="ed">
+        <div class="roomtabs" id="roomtabs"></div>
+        <div class="fields">
+          <label>Nome<input id="f-name"></label><label>Sensores<div id="f-node" class="nodes"></div></label>
+          <label>Largura (m)<input id="f-w" type="number" step="0.5" min="1" max="10"></label><label>Comprimento (m)<input id="f-h" type="number" step="0.5" min="1" max="10"></label>
+        </div>
+        <div class="box2d" id="edit-box"></div>
+        <p class="hint">Vista de cima. Clique num móvel da lista para colocar; arraste para a posição; selecione e use Remover. Medidas aproximadas — só a proporção importa.</p>
+        <div class="btns" style="margin-top:8px"><button id="b-remove">Remover móvel selecionado</button><button id="b-newroom">Novo cômodo</button><button id="b-delroom" class="crit">Excluir cômodo</button></div>
+      </div>
+      <aside class="ed palette"><h3>Móveis</h3><div class="grid" id="palette"></div></aside>
+    </div>
+  </section>
+
+  <!-- Aviso de privacidade: representação, não filmagem -->
+  <footer><span class="ico">✓</span><div><strong>Nenhuma imagem é capturada.</strong> A figura representa apenas o que os sensores detectam: presença, movimento e queda. A postura (sentada, deitada) é deduzida pelo móvel onde a pessoa parou. Representação, não filmagem.</div></footer>
+</div>
+
+<script>
+// Todo o código fica numa IIFE para não poluir o escopo global.
+(function(){
+  // ---------- catálogo de móveis ----------
+  // CAT: tipo -> nome, largura w / comprimento h / altura z em metros, p = postura ao parar ali
+  // ('sit' senta, 'lie' deita), r = redondo, pass = atravessável (porta). LBL: rótulo curto desenhado no móvel.
+  /* catálogo: tamanho (m) e altura (m) */
+  const CAT={
+    bed:{n:"cama de casal",w:1.6,h:2,z:.5,p:"lie"}, bed1:{n:"cama de solteiro",w:1,h:2,z:.5,p:"lie"},
+    nightstand:{n:"criado-mudo",w:.5,h:.5,z:.6}, dresser:{n:"penteadeira",w:1.2,h:.5,z:.75}, wardrobe:{n:"armário",w:1.6,h:.6,z:2}, desk:{n:"escrivaninha",w:1.2,h:.6,z:.75},
+    sofa2:{n:"sofá 2 lugares",w:1.6,h:.9,z:.45,p:"sit"}, sofa3:{n:"sofá 3 lugares",w:2.2,h:.9,z:.45,p:"sit"}, armchair:{n:"poltrona",w:.9,h:.9,z:.45,p:"sit"}, coffee:{n:"mesa de centro",w:.9,h:.5,z:.4},
+    tround:{n:"mesa redonda",w:1.1,h:1.1,z:.75,r:1,p:"sit"}, tsquare:{n:"mesa quadrada",w:1,h:1,z:.75,p:"sit"}, trect:{n:"mesa retangular",w:1.6,h:.9,z:.75,p:"sit"}, chair:{n:"cadeira",w:.45,h:.45,z:.45,p:"sit"},
+    toilet:{n:"privada",w:.45,h:.7,z:.4}, sink:{n:"pia banheiro",w:.6,h:.45,z:.85}, shower:{n:"chuveiro / box",w:.9,h:.9,z:.05},
+    ksink:{n:"pia cozinha",w:1.2,h:.6,z:.9}, fridge:{n:"geladeira",w:.7,h:.7,z:1.8}, stove:{n:"fogão",w:.6,h:.6,z:.9},
+    door:{n:"porta",w:.9,h:.25,z:0,pass:1},
+  };
+  const LBL={bed:"cama",bed1:"cama",nightstand:"criado",dresser:"penteadeira",wardrobe:"armário",desk:"escrivaninha",sofa2:"sofá",sofa3:"sofá",armchair:"poltrona",coffee:"centro",tround:"mesa",tsquare:"mesa",trect:"mesa",chair:"cadeira",toilet:"vaso",sink:"pia",shower:"box",ksink:"pia",fridge:"gelad.",stove:"fogão",door:"porta"};
+  // Sensores disponíveis no editor e planta padrão (4 cômodos), usada quando não há rooms.json nem cache local.
+  const NODES=["node-01","node-02","node-03","node-04","node-05","node-06"];
+  let rooms=[
+    {id:"quarto",name:"Quarto",w:3,h:4,node:"node-01",furn:[{t:"bed",x:8,y:8},{t:"nightstand",x:62,y:8},{t:"wardrobe",x:8,y:84},{t:"door",x:62,y:94}]},
+    {id:"banheiro",name:"Banheiro",w:2,h:2.5,node:"node-04",furn:[{t:"toilet",x:8,y:8},{t:"sink",x:60,y:8},{t:"shower",x:52,y:58},{t:"door",x:6,y:90}]},
+    {id:"cozinha",name:"Cozinha",w:3,h:3,node:"node-03",furn:[{t:"ksink",x:6,y:6},{t:"stove",x:50,y:6},{t:"fridge",x:74,y:6},{t:"tsquare",x:36,y:50},{t:"chair",x:36,y:86},{t:"chair",x:62,y:50},{t:"door",x:68,y:92}]},
+    {id:"sala",name:"Sala",w:4.5,h:4,node:"node-02",furn:[{t:"sofa3",x:6,y:66},{t:"coffee",x:22,y:46},{t:"armchair",x:70,y:66},{t:"desk",x:60,y:8},{t:"door",x:40,y:94}]},
+  ];
+  // Cache local da planta; a versão do servidor (/api/rooms) tem prioridade (ver inicialização no fim).
+  try{ const s=localStorage.getItem("sentinela-rooms-v3"); if(s) rooms=JSON.parse(s); }catch(e){}
+  // Sensores de um cômodo: lista 'nodes' (formato novo) ou campo 'node' único (formato antigo).
+  function nodesOf(r){ return (r.nodes&&r.nodes.length)?r.nodes:(r.node?[r.node]:[]); }
+  // Persiste a planta: localStorage + PUT /api/rooms (rooms.json no servidor).
+  function save(){ try{ localStorage.setItem("sentinela-rooms-v3",JSON.stringify(rooms)); }catch(e){} fetch("/api/rooms",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(rooms)}).catch(()=>{}); }
+
+  // Estado percebido por cômodo: people, kind (empty/walk/still/warn/fall/nosignal) e furn (índice do móvel em uso).
+  const sense={}; rooms.forEach(r=>sense[r.id]={people:0,kind:"empty",furn:null});
+  let focused=null, companyMode=false;
+  const PX=70; // px por metro na cena
+
+  /* silhueta humana neutra: 4 posturas em SVG (viewBox 26 x 62) */
+  const SIL={
+    stand:'<g class="idle"><circle class="hd" cx="13" cy="7" r="6"/><rect class="tr" x="7" y="14" width="12" height="22" rx="4"/><rect class="lm al" x="2" y="15" width="4.5" height="18" rx="2.2"/><rect class="lm ar" x="19.5" y="15" width="4.5" height="18" rx="2.2"/><rect x="7.5" y="35" width="5" height="26" rx="2.4"/><rect x="13.5" y="35" width="5" height="26" rx="2.4"/></g>',
+    walk:'<g class="gait"><circle cx="13" cy="7" r="6"/><rect x="7" y="14" width="12" height="22" rx="4"/><rect class="lm al" x="2" y="15" width="4.5" height="18" rx="2.2"/><rect class="lm ar" x="19.5" y="15" width="4.5" height="18" rx="2.2"/><rect class="lm ll" x="7.5" y="35" width="5" height="26" rx="2.4"/><rect class="lm lr" x="13.5" y="35" width="5" height="26" rx="2.4"/></g>',
+    // sentada (perfil): tronco vertical, coxas na horizontal, canelas descendo até o chão
+    sit:'<g class="idle"><circle class="hd" cx="9" cy="7" r="6"/><rect class="tr" x="4" y="13" width="10" height="25" rx="4"/><rect x="7" y="33" width="18" height="6.5" rx="3"/><rect x="5.5" y="34.5" width="17" height="6" rx="3"/><rect x="19.5" y="37" width="5.5" height="25" rx="2.5"/><rect x="17" y="38" width="5" height="24" rx="2.5"/><rect x="4.5" y="16" width="4.5" height="13" rx="2.2"/><rect x="6" y="27" width="12" height="4.2" rx="2.1"/></g>',
+    // deitado: viewBox 62 x 26 (horizontal), cabeça à esquerda
+    lie:'<g><circle cx="7" cy="13" r="6"/><rect x="14" y="7" width="22" height="12" rx="4"/><rect x="15" y="2" width="18" height="4.5" rx="2.2"/><rect x="15" y="19.5" width="18" height="4.5" rx="2.2"/><rect x="35" y="7.5" width="26" height="5" rx="2.4"/><rect x="35" y="13.5" width="26" height="5" rx="2.4"/></g>',
+  };
+  // Corpo deitado em volumes 3D como string HTML (a cena usa lyingBody(); mantido para figHTML).
+  function lie3dHTML(cls){
+    const box=(c,x,y,w,h,ph)=>`<div class="p3 ${c}" style="left:${x}px;top:${y}px;width:${w}px;height:${h}px;--ph:${ph}px"><div class="pa"></div><div class="pb"></div><div class="pl"></div><div class="pr"></div><div class="pt"></div></div>`;
+    return `<div class="fig3 ${cls}"><div class="sh"></div>${box("head",2,10,16,16,15)}${box("torso",20,4,42,28,15)}${box("arm",24,0,36,5,8)}${box("arm",24,31,36,5,8)}${box("leg",62,7,52,10,11)}${box("leg",62,19,52,10,11)}</div>`;
+  }
+  // HTML da figura: deitada -> volumes 3D; demais posturas -> silhueta SVG em billboard.
+  function figHTML(cls,post){ if(post==="lie") return lie3dHTML(cls); const flat=post==="lie"; return `<div class="fig ${cls}${flat?" flat":""}"><div class="sh"></div><svg viewBox="${flat?"0 0 62 26":"0 0 26 62"}">${SIL[post]||SIL.stand}</svg></div>`; }
+  // projeta um ponto (x%,y%) do piso para coordenadas da tela, dentro de .scene
+  function project(x,y){ const sc=iso.parentElement.getBoundingClientRect(); const p=document.createElement("div"); p.style.cssText=`position:absolute;left:${x}%;top:${y}%;width:0;height:0`; iso.appendChild(p); const r=p.getBoundingClientRect(); p.remove(); return {x:r.left-sc.left, y:r.top-sc.top}; }
+
+  /* ---------- navegação no piso: grade de 25 cm, móveis = células bloqueadas ---------- */
+  // Monta a grade do cômodo (célula = 25 cm): 1 = bloqueado por móvel, 0 = livre.
+  function grid(r){
+    const cw=Math.max(4,Math.round(r.w/0.25)), ch=Math.max(4,Math.round(r.h/0.25));
+    const g=Array.from({length:ch},()=>Array(cw).fill(0));
+    r.furn.forEach(f=>{ const c=CAT[f.t]; if(c.pass) return;
+      let x0=Math.floor(f.x/100*cw), y0=Math.floor(f.y/100*ch), x1=Math.ceil((f.x+c.w/r.w*100)/100*cw), y1=Math.ceil((f.y+c.h/r.h*100)/100*ch);
+      // vão de até 50 cm entre o móvel e a parede: fecha o vão (ninguém passa ali; era o caso da escrivaninha)
+      if(x0<=2) x0=0; if(y0<=2) y0=0; if(x1>=cw-2) x1=cw; if(y1>=ch-2) y1=ch;
+      for(let y=Math.max(0,y0);y<Math.min(ch,y1);y++) for(let x=Math.max(0,x0);x<Math.min(cw,x1);x++) g[y][x]=1; });
+    return {g,cw,ch};
+  }
+  // Célula dentro da grade e livre?
+  function free(G,x,y){ return y>=0&&y<G.ch&&x>=0&&x<G.cw&&G.g[y][x]===0; }
+  // Célula livre mais próxima (busca em anéis crescentes).
+  function nearestFree(G,x,y){ if(free(G,x,y)) return [x,y]; for(let d=1;d<Math.max(G.cw,G.ch);d++) for(let dy=-d;dy<=d;dy++) for(let dx=-d;dx<=d;dx++) if(free(G,x+dx,y+dy)) return [x+dx,y+dy]; return [x,y]; }
+  // Caminho de a até b desviando dos móveis (BFS em 4 direções); sem rota, fica em a.
+  function route(G,a,b){ // BFS 4-direções
+    const key=(x,y)=>y*G.cw+x, prev=new Map(), q=[a]; prev.set(key(...a),null);
+    while(q.length){ const [x,y]=q.shift(); if(x===b[0]&&y===b[1]) break;
+      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){ const nx=x+dx,ny=y+dy; if(free(G,nx,ny)&&!prev.has(key(nx,ny))){ prev.set(key(nx,ny),[x,y]); q.push([nx,ny]); } } }
+    if(!prev.has(key(...b))) return [a]; const path=[]; let c=b; while(c){ path.push(c); c=prev.get(key(...c)); } return path.reverse();
+  }
+  // retângulo livre de cw x ch células, o mais perto possível de (px,py); devolve [x0,y0] ou null
+  function findRect(G,cw,ch,px,py){ const ok=(x0,y0)=>{ for(let y=y0;y<y0+ch;y++) for(let x=x0;x<x0+cw;x++) if(!free(G,x,y)) return false; return true; };
+    const sx=Math.round(px-cw/2), sy=Math.round(py-ch/2);
+    for(let d=0;d<Math.max(G.cw,G.ch);d++) for(let dy=-d;dy<=d;dy++) for(let dx=-d;dx<=d;dx++){ if(Math.max(Math.abs(dx),Math.abs(dy))!==d) continue; if(ok(sx+dx,sy+dy)) return [sx+dx,sy+dy]; }
+    return null; }
+  // Centro da célula em % do cômodo (coordenadas que o CSS usa).
+  function cellPct(G,c){ return [ (c[0]+.5)/G.cw*100, (c[1]+.5)/G.ch*100 ]; }
+  // Sorteia uma célula livre (destino do passeio da figura).
+  function randomFree(G){ for(let i=0;i<200;i++){ const x=Math.floor(Math.random()*G.cw), y=Math.floor(Math.random()*G.ch); if(free(G,x,y)) return [x,y]; } return [0,0]; }
+
+  // caixa 3D genérica (x,y,w,h em % do cômodo; zpx altura; basepx elevação da base)
+  function box3(x,y,w,h,zpx,basepx,cls){ const d=document.createElement("div"); d.className="f3 body3 "+(cls||"");
+    d.style.cssText=`left:${x}%;top:${y}%;width:${w}%;height:${h}%;--fh:${zpx}px;transform:translateZ(${basepx}px)`;
+    d.innerHTML='<div class="side"></div><div class="side2"></div><div class="side3"></div><div class="side4"></div><div class="top"></div>'; return d; }
+  // corpo deitado em volumes: cabeça, tronco, pernas — ao longo do eixo maior do móvel (ou do chão, na queda)
+  function lyingBody(r,x,y,w,h,basepx,alongX,cls){ // x,y = canto (em %) do retângulo 1,7 x 0,5 m onde o corpo deita
+    // peças em metros, no sistema "ao longo (u) x através (v)": [u,v,comp,larg,altura,classe]
+    const P=[[.02,.13,.24,.24,.22,"head"],[.28,.03,.58,.44,.24,""],[.88,.08,.8,.15,.16,""],[.88,.27,.8,.15,.16,""]];
+    P.forEach(([u,v,cu,cv,z,k])=>{ const mx=alongX?u:v, my=alongX?v:u, mw=alongX?cu:cv, mh=alongX?cv:cu;
+      iso.appendChild(box3(x+mx/r.w*100, y+my/r.h*100, mw/r.w*100, mh/r.h*100, Math.round(z*PX), basepx, k+" "+(cls||""))); });
+  }
+
+
+  /* coloca a figura no piso em (x%,y%) dentro da cena 3D; lift = altura (px) acima do piso (assento/colchão) */
+  function placeFig(el,x,y,lift,rz){ el.style.left=x+"%"; el.style.top=y+"%"; el.style.setProperty("--lift",(lift||0)+"px"); el.style.setProperty("--rz",(rz||0)+"deg"); if(!el.classList.contains("flat")&&!el.classList.contains("fig3")&&lift) el.style.transform=`translate(-50%,-100%) translateZ(${lift}px) rotateZ(calc(-1*var(--spin))) rotateX(calc(-1*var(--tilt)))`; }
+
+  /* anda pelo cômodo desviando dos móveis: sorteia destinos livres e segue a rota célula a célula */
+  const walkers=new Map();
+  // Passeio contínuo: sorteia um destino, segue a rota célula a célula (260 ms), pausa e repete.
+  function startWalk(el,r,G,start){
+    let cur=start; let alive=true; walkers.set(el,()=>alive=false);
+    const step=()=>{ if(!alive||!el.isConnected) return;
+      const dest=randomFree(G); const path=route(G,cur,dest); let i=1;
+      const tick=()=>{ if(!alive||!el.isConnected) return; if(i>=path.length){ el.classList.add("pause"); setTimeout(()=>{ el.classList.remove("pause"); step(); },1400); return; }
+        const [px,py]=cellPct(G,path[i]); const a=project(...cellPct(G,cur)), b=project(px,py);
+        if(Math.abs(b.x-a.x)>1) el.classList.toggle("face-l",b.x<a.x);
+        placeFig(el,px,py,0,0); cur=path[i]; lastCell[r.id]=cur; i++; setTimeout(tick,260); };
+      tick(); };
+    step();
+  }
+  // Cancela todos os passeios em andamento (chamado antes de redesenhar a cena).
+  function stopWalkers(){ walkers.forEach(stop=>stop()); walkers.clear(); }
+  const lastCell={}; // última posição (célula) da figura principal em cada cômodo
+  // caminha por um trajeto fixo e chama cb ao chegar
+  function walkPath(el,rid,G,path,cb){
+    let alive=true; walkers.set(el,()=>alive=false); let i=1, cur=path[0];
+    const tick=()=>{ if(!alive||!el.isConnected) return; if(i>=path.length){ walkers.delete(el); cb(); return; }
+      const [px,py]=cellPct(G,path[i]); const a=project(...cellPct(G,cur)), b=project(px,py);
+      if(Math.abs(b.x-a.x)>1) el.classList.toggle("face-l",b.x<a.x);
+      placeFig(el,px,py,0,0); cur=path[i]; lastCell[rid]=cur; i++; setTimeout(tick,260); };
+    tick();
+  }
+
+  // Referências aos elementos da aba Monitor.
+  const iso=document.getElementById("iso"), rnName=document.getElementById("rn-name"), rnMeta=document.getElementById("rn-meta");
+  const stageStatus=document.getElementById("stage-status"), roomlist=document.getElementById("roomlist");
+  const modeEl=document.getElementById("mode"), modeD=document.getElementById("mode-d"), modeN=document.getElementById("mode-n"), log=document.getElementById("log");
+
+  // ---------- renderStage: redesenha a cena 3D do cômodo em foco ----------
+  // Piso, paredes, portas e móveis como caixas 3D; depois uma figura por pessoa, na postura certa
+  // (andando, sentada, deitada, queda), caminhando até o móvel quando já estava no cômodo.
+  // Por fim atualiza a pílula de estado e a lista de cômodos.
+  function renderStage(){
+    const r=rooms.find(x=>x.id===focused)||rooms[0]; if(!r) return; const s=sense[r.id];
+    const W=Math.round(r.w*PX), H=Math.round(r.h*PX), WH=Math.round(1.1*PX);
+    rnName.textContent=r.name; rnMeta.textContent=`${r.w} × ${r.h} m · ${nodesOf(r).join(" + ")||"sem sensor"}`;
+    iso.style.width=W+"px"; iso.style.height=H+"px"; iso.style.setProperty("--wh",WH+"px");
+    iso.innerHTML=`<div class="floor ${s.kind==="fall"?"crit":s.kind==="warn"?"warn":""}"></div><div class="wall back"></div><div class="wall left"></div>`;
+    r.furn.forEach(f=>{ const c=CAT[f.t]; const d=document.createElement("div");
+      if(c.pass){ d.className="door"; d.style.cssText=`left:${f.x}%;top:${f.y}%;width:${c.w/r.w*100}%;height:${c.h/r.h*100}%;--dh:${Math.round(2.1*PX*.5)}px`;
+        d.innerHTML=`<div class="sill"></div><div class="jamb a"></div><div class="jamb b"></div><div class="lbl">porta</div>`; iso.appendChild(d); return; }
+      d.className="f3"+(c.r?" round":"")+(c.p==="lie"?" bed"+(c.w>c.h?" vert":""):"");
+      d.style.cssText=`left:${f.x}%;top:${f.y}%;width:${c.w/r.w*100}%;height:${c.h/r.h*100}%;--fh:${Math.round(c.z*PX*.9)}px`;
+      d.innerHTML=`<div class="side"></div><div class="side2"></div><div class="side3"></div><div class="side4"></div><div class="top">${c.p==="lie"?'<div class="pillow"></div><div class="blanket"></div>':''}${LBL[f.t]}</div>`; iso.appendChild(d); });
+    stopWalkers();
+    const G=grid(r);
+    for(let k=0;k<s.people;k++){
+      let post="stand", cls="breathe", x=50, y=80, lift=0, rz=0, walk=false, lie3=null;
+      const f=(k===0&&s.furn!=null)?r.furn[s.furn]:null;
+      if(s.kind==="walk"){ post="walk"; cls="walk"; walk=true; }
+      else if(s.kind==="fall"&&k===0){ post="lie"; cls="crit"; const c=nearestFree(G,Math.floor(G.cw*.55),Math.floor(G.ch*.6)); [x,y]=cellPct(G,c);
+        const cx=Math.floor(G.cw*.55), cy=Math.floor(G.ch*.6); let alongX=true, rc=findRect(G,7,2,cx,cy); if(!rc){ alongX=false; rc=findRect(G,2,7,cx,cy); }
+        const bw=(alongX?1.7:.5)/r.w*100, bh=(alongX?.5:1.7)/r.h*100;
+        if(rc) lie3={x:rc[0]/G.cw*100,y:rc[1]/G.ch*100,w:bw,h:bh,base:0,alongX,cls:"crit"};
+        else lie3={x:Math.max(1,Math.min(99-bw,x-bw/2)),y:Math.max(1,Math.min(99-bh,y-bh/2)),w:bw,h:bh,base:0,alongX:true,cls:"crit"}; }
+      else if(f){ const c=CAT[f.t]; const fw=c.w/r.w*100, fh=c.h/r.h*100; x=f.x+fw/2; y=f.y+fh/2;
+        if(c.p==="lie"){ post="lie"; lift=Math.round(c.z*PX*.9); const alongX=c.w>c.h;
+          const bw=(alongX?1.7:.5)/r.w*100, bh=(alongX?.5:1.7)/r.h*100;
+          lie3={x:alongX?f.x+fw*.08:f.x+fw/2-bw/2, y:alongX?f.y+fh/2-bh/2:f.y+fh*.08, w:bw, h:bh, base:lift, alongX, cls:""}; }
+        else if(c.p==="sit"){ post="sit"; lift=0;
+          if(c.z>=.7){ const cc=nearestFree(G,Math.floor(x/100*G.cw),Math.floor((f.y+fh)/100*G.ch)); [x,y]=cellPct(G,cc); y-=100/G.ch*.3; } // mesa: senta na frente, fora do tampo
+          else y=f.y+fh*.92; } else { const cc=nearestFree(G,Math.floor(x/100*G.cw),Math.floor((f.y+fh)/100*G.ch)+1); [x,y]=cellPct(G,cc); } }
+      else { const c=nearestFree(G,Math.floor(G.cw*(k?.35:.5)),Math.floor(G.ch*.75)); [x,y]=cellPct(G,c); }
+      const wrap=document.createElement("div"); wrap.innerHTML=figHTML(cls+(k?" other":""),post);
+      let el=wrap.firstChild; iso.appendChild(el);
+      const pose=(elm)=>{ if(lie3){ elm.remove(); lyingBody(r,lie3.x,lie3.y,lie3.w,lie3.h,lie3.base,lie3.alongX,lie3.cls); } else placeFig(elm,x,y,lift,rz); };
+      if(walk){ const start=lastCell[r.id]&&free(G,...lastCell[r.id])?lastCell[r.id]:randomFree(G); const [sx,sy]=cellPct(G,start); placeFig(el,sx,sy,0,0); startWalk(el,r,G,start); }
+      else if(k===0&&f&&CAT[f.t].p&&lastCell[r.id]&&free(G,...lastCell[r.id])){
+        // já estava no cômodo: caminha até o móvel e só então senta/deita
+        const c=CAT[f.t], fw=c.w/r.w*100, fh=c.h/r.h*100;
+        const goal=nearestFree(G,Math.floor((f.x+fw/2)/100*G.cw),Math.floor((f.y+fh)/100*G.ch)+1);
+        const path=route(G,lastCell[r.id],goal); const posed=el; const walker=document.createElement("div"); walker.innerHTML=figHTML("walk","walk");
+        const w=walker.firstChild; iso.appendChild(w); el.remove(); const [sx,sy]=cellPct(G,lastCell[r.id]); placeFig(w,sx,sy,0,0);
+        walkPath(w,r.id,G,path,()=>{ w.classList.add("pause"); setTimeout(()=>{ if(!w.isConnected) return; w.replaceWith(posed); pose(posed); },350); });
+      }
+      else { pose(el); if(k===0&&!f&&s.kind!=="fall") lastCell[r.id]=nearestFree(G,Math.floor(x/100*G.cw),Math.floor(y/100*G.ch)); }
+    }
+    if(s.kind==="still"&&s.furn!=null&&CAT[r.furn[s.furn].t].p==="lie"){ const f=r.furn[s.furn], c=CAT[f.t], fw=c.w/r.w*100, fh=c.h/r.h*100, vert=c.w>c.h;
+      const cv=document.createElement("div"); cv.className="cover";
+      const zc=Math.round(c.z*PX*.9)+Math.round(.24*PX);
+      cv.style.cssText=vert?`left:${f.x+fw*.34}%;top:${f.y}%;width:${fw*.66}%;height:${fh}%;transform:translateZ(${zc}px)`
+                           :`left:${f.x}%;top:${f.y+fh*.34}%;width:${fw}%;height:${fh*.66}%;transform:translateZ(${zc}px)`;
+      iso.appendChild(cv); }
+    const K={empty:["empty","vazio","ninguém no cômodo"],walk:["ok","em movimento","presença com movimento"],still:["ok","parada","presença, sem movimento"],
+             warn:["warn","atenção","imóvel há 12 min fora da cama · verificar"],fall:["fall","queda","queda detectada · no chão · alerta enviado"],nosignal:["warn","sem sinal","sensor não envia leituras há mais de 2 min · verificar tomada/cabo"]};
+    let [k,l,d]=K[s.kind]||K.empty;
+    if(s.kind==="still"&&s.furn!=null){ const c=CAT[r.furn[s.furn].t]; l=c.p==="lie"?"descansando":c.p==="sit"?"sentada":"parada"; d=(c.p==="lie"?"deitada":c.p==="sit"?"sentada":"parada")+" · "+c.n; }
+    if(companyMode&&(k==="warn"||k==="fall")) d+=" · acompanhada: registrado, sem alarme";
+    stageStatus.dataset.k=k; stageStatus.querySelector(".pill").textContent=l; stageStatus.querySelector(".detail").textContent=d;
+    renderList();
+  }
+  // Lista lateral de cômodos com selo de estado e cálculo do modo da casa: Ninguém / Sozinha / Acompanhada.
+  function renderList(){
+    roomlist.innerHTML="";
+    rooms.forEach(r=>{ const s=sense[r.id]; const b=document.createElement("button"); b.setAttribute("aria-current",r.id===focused);
+      const k=s.kind==="empty"?"empty":s.kind==="fall"?"fall":(s.kind==="warn"||s.kind==="nosignal")?"warn":"ok";
+      const t=s.kind==="empty"?"vazio":s.kind==="nosignal"?"sem sinal":s.kind==="fall"?"queda":s.kind==="warn"?"atenção":(s.people>1?s.people+" pessoas":"ocupado");
+      b.innerHTML=`<span>${r.name}</span><span class="st" data-k="${k}">${t}</span>`; b.addEventListener("click",()=>{ focused=r.id; renderStage(); }); roomlist.appendChild(b); });
+    const total=rooms.reduce((a,r)=>a+sense[r.id].people,0);
+    const m=total===0?"none":(companyMode||total>1)?"company":"alone";
+    modeEl.dataset.m=m; modeEl.querySelector(".k").textContent=m==="none"?"Ninguém em casa":m==="company"?"Acompanhada":"Sozinha";
+    modeD.textContent=m==="none"?"sem detecção":m==="company"?`${Math.max(total,2)} pessoas detectadas · somente registro`:"vigilância ativa · 1 pessoa detectada";
+    const on=rooms.filter(r=>sense[r.id].kind!=="nosignal").length; modeN.textContent=`${rooms.length} cômodos · ${on} sensores online`;
+  }
+  // Registro de eventos no painel de demonstração (mantém as 5 últimas linhas).
+  function note(txt,strong){ const t=new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit",second:"2-digit"}); const d=document.createElement("div"); d.innerHTML=`<time>${t}</time><span>${strong?"<b>"+txt+"</b>":txt}</span>`; log.prepend(d); while(log.children.length>5) log.lastChild.remove(); }
+  // Índice do primeiro móvel do cômodo entre os tipos dados (-1 se não houver).
+  function furnOf(r,types){ return r.furn.findIndex(f=>types.includes(f.t)); }
+  // ---------- demonstração ----------
+  // Aplica um cenário 'comodo:tipo' (walk, sofa, table, bed, warn, fall) ou 'company' / 'none'.
+  function apply(sim){
+    if(sim==="none"){ companyMode=false; rooms.forEach(r=>sense[r.id]={people:0,kind:"empty",furn:null}); renderStage(); note("Nenhuma detecção."); return; }
+    if(sim==="company"){ companyMode=true; const r=rooms.find(x=>x.id===focused)||rooms[0]; const s=sense[r.id]; s.people=Math.max(s.people,1)+1; if(s.kind==="empty") s.kind="still"; renderStage(); note("Segunda pessoa detectada. Modo acompanhada: sem alarmes.",true); return; }
+    const [rid,kind]=sim.split(":"); const r=rooms.find(x=>x.id===rid); if(!r) return;
+    companyMode=false; rooms.forEach(x=>{ if(x.id!==rid) sense[x.id]={people:0,kind:"empty",furn:null}; });
+    const s=sense[rid]; s.people=1; s.furn=null;
+    if(kind==="bed"){ s.kind="still"; s.furn=furnOf(r,["bed","bed1"]); }
+    else if(kind==="sofa"){ s.kind="still"; s.furn=furnOf(r,["sofa2","sofa3","armchair"]); }
+    else if(kind==="table"){ s.kind="still"; const ch=furnOf(r,["chair"]); s.furn=ch>=0?ch:furnOf(r,["tround","tsquare","trect"]); }
+    else s.kind=kind;
+    focused=rid; renderStage();
+    const M={walk:`Movimento: ${r.name}.`,bed:"Deitou na cama.",sofa:"Sentou no sofá.",table:"Sentou à mesa.",warn:`Imóvel há 12 min: ${r.name}. Verificar.`,fall:`QUEDA: ${r.name}. Alerta enviado.`,still:`Parada: ${r.name}.`};
+    note(M[kind]||kind,kind==="fall"||kind==="warn");
+  }
+  // Botões de cenário e roteiro automático (Rodar cenário) com 2,8 s por passo.
+  document.querySelectorAll("[data-sim]").forEach(b=>b.addEventListener("click",()=>apply(b.dataset.sim)));
+  const story=["sala:walk","cozinha:table","sala:sofa","quarto:bed","banheiro:warn","sala:walk","sala:fall","company","none"];
+  let playing=false;
+  document.getElementById("b-play").addEventListener("click",async function(){ if(playing) return; playing=true; this.disabled=true; for(const s of story){ apply(s); await new Promise(r=>setTimeout(r,2800)); } playing=false; this.disabled=false; });
+
+  /* câmera: giro em passos de 45°, inclinação 30–75° */
+  const sceneEl=document.getElementById("scene"); let cam={tilt:58,spin:-40};
+  try{ const c=JSON.parse(localStorage.getItem("sentinela-cam")); if(c&&c.tilt) cam=c; }catch(e){}
+  function setCam(){ sceneEl.style.setProperty("--tilt",cam.tilt+"deg"); sceneEl.style.setProperty("--spin",cam.spin+"deg"); try{ localStorage.setItem("sentinela-cam",JSON.stringify(cam)); }catch(e){} }
+  setCam();
+  document.getElementById("cam-l").onclick=()=>{ cam.spin-=45; setCam(); };
+  document.getElementById("cam-r").onclick=()=>{ cam.spin+=45; setCam(); };
+  document.getElementById("cam-up").onclick=()=>{ cam.tilt=Math.max(30,cam.tilt-10); setCam(); };
+  document.getElementById("cam-dn").onclick=()=>{ cam.tilt=Math.min(75,cam.tilt+10); setCam(); };
+  // arrastar sobre a cena: horizontal gira, vertical inclina
+  let drag=null;
+  sceneEl.addEventListener("pointerdown",e=>{ if(e.target.closest(".cam")) return; drag={x:e.clientX,y:e.clientY,spin:cam.spin,tilt:cam.tilt}; sceneEl.setPointerCapture(e.pointerId); iso.style.transition="none"; });
+  sceneEl.addEventListener("pointermove",e=>{ if(!drag) return; cam.spin=drag.spin+(e.clientX-drag.x)*.4; cam.tilt=Math.max(30,Math.min(75,drag.tilt-(e.clientY-drag.y)*.25)); setCam(); });
+  const endDrag=()=>{ if(!drag) return; drag=null; iso.style.transition=""; };
+  sceneEl.addEventListener("pointerup",endDrag); sceneEl.addEventListener("pointercancel",endDrag);
+
+  /* tema dia / noite */
+  const themeBtn=document.getElementById("theme");
+  function applyTheme(t){ if(t) document.documentElement.dataset.theme=t; else delete document.documentElement.dataset.theme;
+    const dark=t?t==="dark":matchMedia("(prefers-color-scheme: dark)").matches; themeBtn.textContent=dark?"☀":"☾"; }
+  let theme=null; try{ theme=localStorage.getItem("sentinela-theme"); }catch(e){} applyTheme(theme);
+  themeBtn.onclick=()=>{ const dark=document.documentElement.dataset.theme?document.documentElement.dataset.theme==="dark":matchMedia("(prefers-color-scheme: dark)").matches;
+    theme=dark?"light":"dark"; try{ localStorage.setItem("sentinela-theme",theme); }catch(e){} applyTheme(theme); };
+
+  /* editor 2D */
+  const secView=document.getElementById("sec-view"), secEdit=document.getElementById("sec-edit"), tabV=document.getElementById("tab-view"), tabE=document.getElementById("tab-edit");
+  const roomtabs=document.getElementById("roomtabs"), editBox=document.getElementById("edit-box"), palette=document.getElementById("palette");
+  const fName=document.getElementById("f-name"), fNode=document.getElementById("f-node"), fW=document.getElementById("f-w"), fH=document.getElementById("f-h");
+  let editId=null, selIdx=null;
+  NODES.forEach(n=>{ const l=document.createElement("label"); l.innerHTML=`<input type="checkbox" value="${n}"> ${n}`; fNode.appendChild(l); });
+  fNode.addEventListener("change",()=>{ const r=cur(); if(!r) return; r.nodes=[...fNode.querySelectorAll("input:checked")].map(i=>i.value); r.node=r.nodes[0]||""; save(); renderEdit(); });
+  Object.entries(CAT).forEach(([t,c])=>{ const b=document.createElement("button"); b.textContent=c.n; b.addEventListener("click",()=>{ const r=cur(); r.furn.push({t,x:40,y:40}); selIdx=r.furn.length-1; save(); renderEdit(); }); palette.appendChild(b); });
+  // Cômodo em edição.
+  function cur(){ return rooms.find(r=>r.id===editId); }
+  // Abas de cômodos do editor.
+  function renderTabs(){ roomtabs.innerHTML=""; rooms.forEach(r=>{ const b=document.createElement("button"); b.textContent=r.name; b.setAttribute("aria-current",r.id===editId); b.addEventListener("click",()=>{ editId=r.id; selIdx=null; renderEdit(); }); roomtabs.appendChild(b); }); }
+  // Redesenha o editor 2D: campos, caixa do cômodo em escala e móveis arrastáveis (pointer events).
+  function renderEdit(){
+    renderTabs(); const r=cur(); if(!r) return;
+    fName.value=r.name; const ns=nodesOf(r); fNode.querySelectorAll("input").forEach(i=>i.checked=ns.includes(i.value)); fW.value=r.w; fH.value=r.h;
+    const ES=Math.min(90,Math.floor(Math.min(560,editBox.parentElement.clientWidth-28)/r.w));
+    editBox.style.width=Math.round(r.w*ES)+"px"; editBox.style.height=Math.round(r.h*ES)+"px"; editBox.innerHTML="";
+    r.furn.forEach((f,i)=>{ const c=CAT[f.t]; const d=document.createElement("div"); d.className="furn2d"+(c.r?" round":"")+(c.pass?" door":"")+(i===selIdx?" sel":"");
+      d.style.cssText=`left:${f.x}%;top:${f.y}%;width:${c.w/r.w*100}%;height:${c.h/r.h*100}%`; d.textContent=LBL[f.t];
+      d.addEventListener("pointerdown",e=>{ selIdx=i; editBox.querySelectorAll(".furn2d").forEach(x=>x.classList.remove("sel")); d.classList.add("sel");
+        const rect=editBox.getBoundingClientRect(); const ox=e.clientX-rect.left-f.x/100*rect.width, oy=e.clientY-rect.top-f.y/100*rect.height; d.setPointerCapture(e.pointerId);
+        const mv=ev=>{ const w=c.w/r.w*100,h=c.h/r.h*100; f.x=Math.max(0,Math.min(100-w,(ev.clientX-rect.left-ox)/rect.width*100)); f.y=Math.max(0,Math.min(100-h,(ev.clientY-rect.top-oy)/rect.height*100)); d.style.left=f.x+"%"; d.style.top=f.y+"%"; };
+        const up=()=>{ d.removeEventListener("pointermove",mv); d.removeEventListener("pointerup",up); save(); };
+        d.addEventListener("pointermove",mv); d.addEventListener("pointerup",up); });
+      editBox.appendChild(d); });
+  }
+  // Campos nome/largura/comprimento e botões: remover móvel, novo cômodo, excluir cômodo.
+  [fName,fW,fH].forEach(el=>el.addEventListener("change",()=>{ const r=cur(); if(!r) return; r.name=fName.value||r.name; r.w=Math.max(1,+fW.value||r.w); r.h=Math.max(1,+fH.value||r.h); save(); renderEdit(); }));
+  document.getElementById("b-remove").addEventListener("click",()=>{ const r=cur(); if(r&&selIdx!=null){ r.furn.splice(selIdx,1); selIdx=null; save(); renderEdit(); } });
+  document.getElementById("b-newroom").addEventListener("click",()=>{ const id="c"+Date.now(); rooms.push({id,name:"Novo cômodo",w:3,h:3,node:NODES[rooms.length%NODES.length],furn:[]}); sense[id]={people:0,kind:"empty",furn:null}; editId=id; selIdx=null; save(); renderEdit(); });
+  document.getElementById("b-delroom").addEventListener("click",()=>{ if(rooms.length<=1) return; rooms=rooms.filter(r=>r.id!==editId); editId=rooms[0].id; if(focused&&!rooms.find(r=>r.id===focused)) focused=rooms[0].id; save(); renderEdit(); });
+  // Alterna entre as abas Monitor (view=true) e Ambiente.
+  function show(view){ secView.hidden=!view; secEdit.hidden=view; tabV.setAttribute("aria-selected",view); tabE.setAttribute("aria-selected",!view); if(view){ rooms.forEach(r=>{ if(!sense[r.id]) sense[r.id]={people:0,kind:"empty",furn:null}; }); renderStage(); } else { if(!editId) editId=rooms[0].id; renderEdit(); } }
+  tabV.addEventListener("click",()=>show(true)); tabE.addEventListener("click",()=>show(false));
+  window.addEventListener("resize",()=>{ if(!secEdit.hidden) renderEdit(); else renderStage(); });
+
+  // Estado inicial: primeiro cômodo em foco e um cenário de demonstração até chegarem dados reais.
+  focused=rooms[0].id; apply("sala:walk"); note("Sistema ativo.");
+
+  /* ---------- AO VIVO: estado real vindo da casa (webSentinela -> T-140) ---------- */
+  const liveEl=document.getElementById("live"), liveT=document.getElementById("live-t");
+  let liveOn=false, lastSig="";
+  // Indicador ao vivo: s = wait / ok / old / off / sim, t = texto.
+  function setLive(s,t){ liveEl.dataset.s=s; liveT.textContent=t; }
+  // simulação só enquanto não há dados reais; ao clicar num botão de demo, volta à simulação por 60 s
+  let srcMode="live"; try{ srcMode=localStorage.getItem("sentinela-src")||"live"; }catch(e){}
+  // Fonte de dados: 'live' (poll do /api/state) ou 'sim' (só botões de demonstração); lembrada no localStorage.
+  function setSrc(m){ srcMode=m; document.body.dataset.src=m; document.getElementById("src-live").setAttribute("aria-pressed",m==="live"); document.getElementById("src-sim").setAttribute("aria-pressed",m==="sim");
+    try{ localStorage.setItem("sentinela-src",m); }catch(e){} if(m==="sim"){ setLive("sim","simulação — dados reais ignorados"); note("Modo simulação.",true); } else { lastSig=""; note("Modo ao vivo.",true); poll(); } }
+  document.getElementById("src-live").onclick=()=>setSrc("live"); document.getElementById("src-sim").onclick=()=>setSrc("sim");
+  const simUntil=0;
+  // regra de casa de uma pessoa: movimento = energia acima do ruído do nó; a pessoa está no cômodo
+  // com movimento mais recente; parou = continua lá, parada; sem movimento em lugar nenhum por 30 min = ninguém
+  const MOV_DELTA=0.12, STILL_WARN=720, NOBODY=1800, BED_AFTER=180, SIT_AFTER=60;
+  const lastMove={};  // id do cômodo -> epoch (s) do último movimento visto
+  let lastFocusRoom=null;
+  // Traduz o JSON de /api/state em estado dos cômodos: nó sem pacote há 2 min = sem sinal; movimento =
+  // energia > ruído + MOV_DELTA; a pessoa está no cômodo com movimento mais recente; parada há mais de
+  // 60 s senta, 180 s deita (se houver cama), 12 min = atenção; queda em qualquer nó = queda. Só redesenha se algo mudou.
+  function applyLive(st){
+    if(srcMode!=="live") return;
+    const nodes=st.nodes||{}, now=st.now||Date.now()/1000;
+    let sig=[], anyMotion=null, fallRoom=null, companyNow=false;
+    rooms.forEach(r=>{ const s=sense[r.id];
+      const live=nodesOf(r).map(id=>nodes[id]).filter(n=>n&&(now-(n.last_seen||0))<=120);
+      if(!live.length){ s.people=0; s.kind="nosignal"; s.furn=null; sig.push(r.id+s.kind); return; }
+      // nó mais forte (maior energia acima do ruído); queda se qualquer um acusar
+      const n=live.reduce((a,b)=>(((b.energy||0)-(b.baseline||0))>((a.energy||0)-(a.baseline||0))?b:a)); n.fall=live.some(x=>x.fall)?1:0;
+      const moving = n.fall ? true : ((n.energy||0) > (n.baseline||0)+MOV_DELTA);
+      if(moving) lastMove[r.id]=now;
+      if(n.fall) fallRoom=r.id;
+      if(moving&&(!anyMotion||lastMove[r.id]>=lastMove[anyMotion])) anyMotion=r.id;
+      if((n.people||0)>1&&moving) companyNow=true;
+      s.people=0; s.kind="empty"; s.furn=null; });
+    // onde está a pessoa: último cômodo com movimento (dentro de 30 min)
+    let cur=null, curT=0; rooms.forEach(r=>{ if(lastMove[r.id]&&lastMove[r.id]>curT){ cur=r.id; curT=lastMove[r.id]; } });
+    if(cur&&now-curT>NOBODY) cur=null;
+    companyMode=!!st.company||companyNow;
+    if(cur){ const r=rooms.find(x=>x.id===cur), s=sense[cur], stillS=now-curT;
+      s.people=1;
+      if(fallRoom===cur){ s.kind="fall"; }
+      else if(anyMotion===cur){ s.kind="walk"; }
+      else { const fo=(a)=>{const i=furnOf(r,a); return i<0?null:i;}, bedI=fo(["bed","bed1"]), sitI=fo(["sofa2","sofa3","armchair","chair","tround","tsquare","trect"]);
+        if(bedI!=null&&stillS>BED_AFTER){ s.kind="still"; s.furn=bedI; }
+        else if(stillS>STILL_WARN){ s.kind="warn"; }
+        else if(sitI!=null&&stillS>SIT_AFTER){ s.kind="still"; s.furn=sitI; }
+        else s.kind="still"; }
+      focused=cur; }
+    const S=rooms.map(r=>r.id+sense[r.id].kind+sense[r.id].people+sense[r.id].furn).join("|");
+    if(S!==lastSig){ lastSig=S; renderStage(); rooms.forEach(r=>{ const s=sense[r.id]; if(s.kind==="fall") note(`QUEDA: ${r.name}. Alerta enviado.`,true); else if(s.kind==="warn") note(`Imóvel há ${Math.round((now-curT)/60)} min: ${r.name}. Verificar.`,true); else if(s.kind==="walk"&&lastFocusRoom!==r.id) note(`Movimento: ${r.name}.`); }); lastFocusRoom=cur; }
+    else renderList();
+    // detalhe técnico no rodapé do cômodo em foco: energia × ruído do nó
+    const fr=rooms.find(x=>x.id===focused); const fn=fr&&nodesOf(fr).map(id=>nodes[id]).filter(Boolean).sort((a,b)=>((b.energy||0)-(b.baseline||0))-((a.energy||0)-(a.baseline||0)))[0]; if(fn&&fn.energy!=null){ const d=stageStatus.querySelector(".detail"); d.textContent=d.textContent.replace(/ · energia .*$/,"")+` · energia ${fn.energy.toFixed(2)} / ruído ${(fn.baseline||0).toFixed(2)}`; }
+  }
+  // Busca /api/state a cada 2 s e classifica a idade dos dados (ok, atraso, casa sem envio).
+  async function poll(){
+    try{ const res=await fetch("/api/state",{cache:"no-store"}); if(res.status===401){ console.warn("401"); return; }
+      const st=JSON.parse((await res.text()).replace(/\b(NaN|-?Infinity)\b/g,"0")); const age=st.age!=null?st.age:9999;
+      if(!st.ts){ setLive("wait","aguardando a casa"); }
+      else if(srcMode!=="live"){ /* simulação: ignora */ }
+      else if(age>120){ setLive("off",`casa sem envio há ${Math.round(age/60)} min`); rooms.forEach(r=>{ sense[r.id]={people:0,kind:"nosignal",furn:null}; }); renderStage(); }
+      else { setLive(age>15?"old":"ok", age>15?`atraso ${Math.round(age)} s`:"ao vivo"); applyLive(st); }
+    }catch(e){ setLive("off","sem conexão"); }
+  }
+  // Inicialização: carrega a planta do servidor (se houver), aplica a fonte de dados e inicia o polling.
+  (async()=>{ try{ const r=await fetch("/api/rooms"); const j=await r.json(); if(Array.isArray(j)&&j.length){ rooms=j; rooms.forEach(x=>{ if(!sense[x.id]) sense[x.id]={people:0,kind:"empty",furn:null}; }); renderStage(); } }catch(e){}
+    setSrc(srcMode); setInterval(poll,2000); })();
+})();
+</script>

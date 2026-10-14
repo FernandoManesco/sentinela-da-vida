@@ -1,0 +1,17 @@
+# ambiente e caches
+.venv/
+__pycache__/
+
+# dados locais (banco, planta da casa, estado da nuvem)
+*.db
+*.db-*
+rooms.json
+nuvem/data/
+
+# segredos (token da nuvem, chave do cookie de sessão)
+cloud.json
+.secret_key
+
+# logs
+*.log
+sentinela-log.txt

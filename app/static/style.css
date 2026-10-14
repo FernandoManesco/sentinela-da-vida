@@ -1,0 +1,74 @@
+/* ==========================================================================
+   app/static/style.css — estilo de todas as telas Jinja do webSentinela
+   (login, painel, usuários, dispositivos, erro).
+   Onde roda: navegador (servido em /static/style.css pelo notebook da casa).
+   Conexões: carregado por app/templates/base.html; as classes dos cards e da
+   tabela de eventos são criadas dinamicamente por painel.js.
+   Obs.: app/static/monitor.html tem estilo próprio e não usa este arquivo.
+   ========================================================================== */
+/* Tokens de cor (tema claro). Tudo abaixo usa só estas variáveis. */
+:root {
+  --fundo: #f4f5f7; --superficie: #fff; --texto: #1d2330; --suave: #5d6576; --borda: #d9dde4;
+  --acento: #1f6feb; --ok: #1a7f37; --ok-fundo: #e6f4ea; --off: #8c95a6; --erro: #c62828; --erro-fundo: #fdecea;
+  --aviso: #8a5a00; --aviso-fundo: #fff4d6;
+}
+/* Tema escuro automático, seguindo a preferência do sistema. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fundo: #12151b; --superficie: #1b2029; --texto: #e6e9ef; --suave: #9aa3b5; --borda: #2c3340;
+    --acento: #58a6ff; --ok: #3fb950; --ok-fundo: #12301c; --off: #6e7681; --erro: #ff7b72; --erro-fundo: #3a1a1a;
+    --aviso: #e3b341; --aviso-fundo: #33290d;
+  }
+}
+/* Base: tipografia, largura do conteúdo, títulos e links. */
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--fundo); color: var(--texto); }
+main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 48px; }
+h1 { font-size: 1.4rem; margin: 0 0 16px; }
+h2 { font-size: 1.1rem; margin: 28px 0 10px; }
+a { color: var(--acento); }
+/* Barra superior (marca, navegação, usuário/sair) e faixa de modo simulado. */
+.topo { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 10px 16px; background: var(--superficie); border-bottom: 1px solid var(--borda); }
+.topo nav { display: flex; gap: 14px; flex: 1; }
+.topo nav a { text-decoration: none; }
+.sair { display: flex; gap: 10px; align-items: center; color: var(--suave); }
+.aviso { background: var(--aviso-fundo); color: var(--aviso); padding: 8px 16px; font-weight: 600; text-align: center; }
+/* Mensagens de erro/sucesso e notas. */
+.msg { padding: 10px 12px; border-radius: 6px; }
+.msg.erro { background: var(--erro-fundo); color: var(--erro); }
+.msg.ok { background: var(--ok-fundo); color: var(--ok); }
+.nota { color: var(--suave); font-size: .9rem; }
+/* Botões, campos de formulário e cartões. */
+button { font: inherit; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--acento); background: var(--acento); color: #fff; cursor: pointer; }
+button.perigo { background: transparent; color: var(--erro); border-color: var(--erro); }
+.sair button { background: transparent; color: var(--texto); border-color: var(--borda); }
+input, select { font: inherit; padding: 6px 8px; border: 1px solid var(--borda); border-radius: 6px; background: var(--superficie); color: var(--texto); max-width: 100%; }
+.cartao { background: var(--superficie); border: 1px solid var(--borda); border-radius: 10px; padding: 16px; }
+/* Formulário de login centralizado e formulários em linha (novo usuário/dispositivo). */
+.login { max-width: 340px; margin: 10vh auto 0; display: grid; gap: 12px; }
+.login label { display: grid; gap: 4px; }
+.linha { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.linha label { display: grid; gap: 4px; }
+/* Painel: cabeçalho com indicador de conexão e grade de cards por dispositivo. */
+.cabecalho { display: flex; justify-content: space-between; align-items: baseline; }
+.conexao { color: var(--suave); font-size: .85rem; }
+.conexao.viva { color: var(--ok); }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+.card { background: var(--superficie); border: 1px solid var(--borda); border-left: 4px solid var(--off); border-radius: 10px; padding: 14px; }
+.card.on { border-left-color: var(--ok); }
+.card-topo { display: flex; justify-content: space-between; align-items: center; }
+.selo { font-size: .75rem; font-weight: 600; text-transform: uppercase; color: var(--off); }
+.card.on .selo { color: var(--ok); }
+.comodo { color: var(--suave); margin: 2px 0 10px; }
+.card dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; font-size: .9rem; }
+.card dt { color: var(--suave); }
+.card dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+/* Tabelas (eventos, usuários, dispositivos) e coluna de ações. */
+.tabela { width: 100%; border-collapse: collapse; background: var(--superficie); border: 1px solid var(--borda); border-radius: 10px; overflow: hidden; display: block; overflow-x: auto; }
+.tabela th, .tabela td { padding: 7px 10px; border-bottom: 1px solid var(--borda); text-align: left; white-space: nowrap; }
+.tabela th { color: var(--suave); font-weight: 600; font-size: .85rem; }
+.acoes { display: flex; gap: 6px; }
+.acoes form { margin: 0; }
+/* Destaque de eventos: queda em vermelho, offline esmaecido. */
+tr.ev-queda td { color: var(--erro); font-weight: 600; }
+tr.ev-offline td { color: var(--off); }

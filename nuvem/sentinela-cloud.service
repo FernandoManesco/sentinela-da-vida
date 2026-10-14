@@ -1,0 +1,23 @@
+# =========================================================================
+# nuvem/sentinela-cloud.service — unidade systemd do serviço da nuvem.
+# Onde roda: servidor T-140 (copiar para /etc/systemd/system/ e habilitar).
+# Conexões: sobe o uvicorn com nuvem/app.py em 127.0.0.1:8090; o nginx (nginx-app.conf)
+#   expõe esse processo em https://www.sentineladavida.com.br/app/.
+# =========================================================================
+# Descrição e ordem: só sobe depois da rede.
+[Unit]
+Description=Sentinela da Vida - nuvem (login + monitor + API de estado)
+After=network.target
+
+# Roda como o usuário deploy em /opt/sentinela-cloud; reinicia sozinho 3 s depois
+# se cair. Porta 8090 só em localhost: quem expõe é o nginx.
+[Service]
+User=deploy
+WorkingDirectory=/opt/sentinela-cloud
+ExecStart=/opt/sentinela-cloud/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8090
+Restart=always
+RestartSec=3
+
+# Habilitado no boot: sudo systemctl enable --now sentinela-cloud
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,304 @@
+<!--
+  nuvem/site-index.html — página inicial pública do site www.sentineladavida.com.br.
+  Onde roda: navegador. Servida pelo nginx do T-140 como arquivo estático
+  (/var/www/sentineladavida/html/index.html, ver nuvem/LEIA-ME.md).
+  Conexões: só links. O botão 'Sentinela Monitor' leva a /app/ (login do nuvem/app.py) e
+  'Painel dos sensores' a /app/painel. Não consome nenhuma API.
+-->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sentinela da Vida</title>
+<meta name="description" content="Sentinela da Vida — monitoramento contínuo de idosos por sensoriamento WiFi. Detecta presença, respiração e quedas, sem câmera e sem pulseira.">
+<meta property="og:title" content="Sentinela da Vida">
+<meta property="og:description" content="Um olhar atento sobre quem você ama. Sem câmera, sem pulseira.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.sentineladavida.com.br">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* Tokens de cor da identidade visual (azul profundo, ciano, verde 'pulso') */
+  :root{
+    --abyss:#050e1e;
+    --deep:#0a1c34;
+    --cyan:#35d0ff;
+    --pulse:#43e08c;
+    --ice:#dbeeff;
+    --muted:#7392b6;
+    --ring:rgba(53,208,255,.55);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  /* Fundo com gradientes radiais e conteúdo centralizado */
+  body{
+    font-family:"Inter",system-ui,-apple-system,sans-serif;
+    background:
+      radial-gradient(1200px 800px at 50% 38%, #0c2544 0%, transparent 60%),
+      radial-gradient(900px 700px at 50% 40%, rgba(53,208,255,.10) 0%, transparent 55%),
+      radial-gradient(1400px 1000px at 50% 120%, rgba(67,224,140,.08) 0%, transparent 60%),
+      var(--abyss);
+    color:var(--ice);
+    min-height:100dvh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    overflow:hidden;
+    position:relative;
+    text-align:center;
+  }
+  /* subtle drifting atmosphere */
+  body::before{
+    content:"";
+    position:absolute;inset:-20%;
+    background:radial-gradient(600px 600px at 30% 30%, rgba(53,208,255,.06), transparent 60%),
+               radial-gradient(500px 500px at 72% 68%, rgba(67,224,140,.05), transparent 60%);
+    animation:drift 26s ease-in-out infinite alternate;
+    z-index:0;
+  }
+  @keyframes drift{ from{transform:translate3d(-2%,-1%,0) scale(1)} to{transform:translate3d(2%,2%,0) scale(1.08)} }
+
+  /* ---------- Radar / sensing rings (the signature) ---------- */
+  .radar{
+    position:absolute;
+    top:38%;left:50%;
+    width:0;height:0;
+    z-index:1;
+    pointer-events:none;
+  }
+  .radar .ring{
+    position:absolute;
+    top:50%;left:50%;
+    width:min(88vw,560px);
+    height:min(88vw,560px);
+    margin:calc(min(88vw,560px)/-2) 0 0 calc(min(88vw,560px)/-2);
+    border:1px solid var(--ring);
+    border-radius:50%;
+    opacity:0;
+    transform:scale(.15);
+    animation:sonar 6s cubic-bezier(.2,.55,.35,1) infinite;
+  }
+  .radar .ring:nth-child(2){animation-delay:1.5s}
+  .radar .ring:nth-child(3){animation-delay:3s}
+  .radar .ring:nth-child(4){animation-delay:4.5s}
+  @keyframes sonar{
+    0%{transform:scale(.15);opacity:0}
+    12%{opacity:.75}
+    100%{transform:scale(1);opacity:0}
+  }
+  .core{
+    position:absolute;
+    top:50%;left:50%;
+    width:12px;height:12px;
+    margin:-6px 0 0 -6px;
+    border-radius:50%;
+    background:var(--cyan);
+    box-shadow:0 0 0 4px rgba(53,208,255,.18), 0 0 22px 6px rgba(53,208,255,.6);
+    animation:breathe 4s ease-in-out infinite;
+  }
+  @keyframes breathe{ 0%,100%{transform:scale(1);opacity:.9} 50%{transform:scale(1.5);opacity:1} }
+
+  /* ---------- Content ---------- */
+  .stage{
+    position:relative;
+    z-index:2;
+    padding:2rem 1.4rem;
+    width:100%;
+    max-width:760px;
+  }
+  /* Textos: sobretítulo e título, com 'Vida' em destaque */
+  .eyebrow{
+    font-family:"Chakra Petch",monospace;
+    font-weight:600;
+    font-size:clamp(.62rem,2.2vw,.78rem);
+    letter-spacing:.42em;
+    text-transform:uppercase;
+    color:var(--cyan);
+    opacity:.85;
+    margin-bottom:1.5rem;
+    padding-left:.42em;
+  }
+  h1{
+    font-family:"Chakra Petch",sans-serif;
+    font-weight:700;
+    font-size:clamp(2.3rem,9vw,5.1rem);
+    line-height:.98;
+    letter-spacing:.02em;
+    text-transform:uppercase;
+    text-shadow:0 0 40px rgba(53,208,255,.25);
+  }
+  h1 .life{
+    color:var(--pulse);
+    text-shadow:0 0 30px rgba(67,224,140,.55);
+  }
+
+  /* ---------- ECG / heartbeat line (the "life") ---------- */
+  .ecg{
+    width:min(92%,620px);
+    height:70px;
+    margin:1.7rem auto .2rem;
+    display:block;
+    overflow:visible;
+  }
+  .ecg-base{ fill:none;stroke:rgba(67,224,140,.18);stroke-width:2;stroke-linecap:round;stroke-linejoin:round; }
+  .ecg-scan{
+    fill:none;stroke:var(--pulse);stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;
+    stroke-dasharray:36 964;
+    filter:drop-shadow(0 0 6px rgba(67,224,140,.9));
+    animation:trace 3.6s linear infinite;
+  }
+  @keyframes trace{ from{stroke-dashoffset:1000} to{stroke-dashoffset:0} }
+
+  /* Frase de efeito e pílulas com os três recursos */
+  .tagline{
+    color:var(--ice);
+    opacity:.82;
+    font-size:clamp(.95rem,2.6vw,1.18rem);
+    line-height:1.55;
+    max-width:33ch;
+    margin:.4rem auto 1.9rem;
+    font-weight:400;
+  }
+
+  .pills{
+    display:flex;flex-wrap:wrap;gap:.55rem;justify-content:center;
+    margin-bottom:2.4rem;
+  }
+  .pill{
+    font-family:"Chakra Petch",monospace;
+    font-size:clamp(.66rem,2vw,.78rem);
+    letter-spacing:.08em;
+    color:var(--ice);
+    background:rgba(53,208,255,.06);
+    border:1px solid rgba(53,208,255,.22);
+    padding:.5rem .95rem;
+    border-radius:100px;
+    display:inline-flex;align-items:center;gap:.5rem;
+    backdrop-filter:blur(4px);
+  }
+  .pill .dot{width:6px;height:6px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px var(--cyan)}
+  .pill:nth-child(2) .dot{background:var(--pulse);box-shadow:0 0 8px var(--pulse)}
+  .pill:nth-child(3) .dot{background:#ffb454;box-shadow:0 0 8px #ffb454}
+
+  /* Botão secundário 'Painel dos sensores' com ponto piscante, e subtítulo */
+  .status{
+    display:inline-flex;align-items:center;gap:.7rem;
+    font-family:"Chakra Petch",sans-serif;
+    font-weight:600;
+    letter-spacing:.34em;
+    font-size:clamp(.78rem,2.6vw,1rem);
+    text-transform:uppercase;
+    color:var(--ice);
+    padding:.7rem 1.5rem .7rem 1.35rem;
+    border:1px solid rgba(67,224,140,.35);
+    border-radius:100px;
+    background:rgba(67,224,140,.05);
+    margin-bottom:.9rem;
+    text-decoration:none;cursor:pointer;transition:background .2s;
+  }
+  .status:hover{background:rgba(67,224,140,.14)}
+  .status .live{
+    width:9px;height:9px;border-radius:50%;
+    background:var(--pulse);
+    box-shadow:0 0 10px 2px rgba(67,224,140,.8);
+    animation:blink 1.6s ease-in-out infinite;
+  }
+  @keyframes blink{ 0%,100%{opacity:1} 50%{opacity:.25} }
+  .status .txt{padding-right:.06em}
+
+  .sub{
+    color:var(--muted);
+    font-size:clamp(.82rem,2.3vw,.95rem);
+    margin-bottom:2.6rem;
+  }
+
+  /* Rodapé */
+  footer{
+    font-family:"Chakra Petch",monospace;
+    font-size:clamp(.66rem,2vw,.8rem);
+    letter-spacing:.16em;
+    color:var(--muted);
+    text-transform:uppercase;
+    display:flex;gap:.9rem;align-items:center;justify-content:center;flex-wrap:wrap;
+  }
+  footer .sep{width:4px;height:4px;border-radius:50%;background:var(--muted);opacity:.6}
+  footer a{color:var(--cyan);text-decoration:none;opacity:.9}
+  footer a:hover{opacity:1;text-decoration:underline}
+
+
+  /* Botão principal 'Sentinela Monitor' (leva ao login em /app/) */
+  .enter{
+    display:inline-flex;align-items:center;gap:.7rem;
+    margin:0 auto 2.2rem;padding:.85rem 1.5rem .85rem 1.2rem;
+    border-radius:100px;text-decoration:none;
+    font-family:"Chakra Petch",sans-serif;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+    font-size:clamp(.74rem,2.4vw,.9rem);color:#04111f;
+    background:linear-gradient(135deg,var(--cyan),#5fe0ff);
+    box-shadow:0 0 0 1px rgba(53,208,255,.4),0 0 28px rgba(53,208,255,.35);
+    transition:transform .2s ease,box-shadow .2s ease;
+  }
+  .enter:hover{transform:translateY(-2px);box-shadow:0 0 0 1px rgba(53,208,255,.6),0 0 40px rgba(53,208,255,.55)}
+  .enter svg{width:22px;height:22px;flex:none}
+  .enter small{display:block;font-family:"Inter",sans-serif;font-weight:500;letter-spacing:0;text-transform:none;font-size:.72rem;opacity:.75;margin-top:2px}
+  .enter span{text-align:left;line-height:1.1}
+
+  /* Acessibilidade: sem animações para quem prefere movimento reduzido */
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none!important}
+    .radar .ring{opacity:.28;transform:scale(1)}
+    .radar .ring:nth-child(1){transform:scale(.55)}
+    .radar .ring:nth-child(2){transform:scale(.75)}
+    .ecg-scan{stroke-dasharray:none}
+  }
+</style>
+</head>
+<body>
+
+  <!-- Anéis de 'sonar' animados ao fundo (decorativo) -->
+  <div class="radar" aria-hidden="true">
+    <span class="ring"></span>
+    <span class="ring"></span>
+    <span class="ring"></span>
+    <span class="ring"></span>
+    <span class="core"></span>
+  </div>
+
+  <!-- Conteúdo: título, linha de ECG animada, frase, pílulas, botões de acesso e rodapé -->
+  <main class="stage">
+    <p class="eyebrow">Sensoriamento por WiFi</p>
+
+    <h1>Sentinela<br>da <span class="life">Vida</span></h1>
+
+    <svg class="ecg" viewBox="0 0 1000 120" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+      <path class="ecg-base" d="M0,60 H150 l14,-9 l14,9 H210 l7,7 l7,-52 l7,72 l7,-27 l7,-0 H320 l16,-13 l16,13 H500 l14,-9 l14,9 H560 l7,7 l7,-52 l7,72 l7,-27 l7,-0 H670 l16,-13 l16,13 H1000"/>
+      <path class="ecg-scan" pathLength="1000" d="M0,60 H150 l14,-9 l14,9 H210 l7,7 l7,-52 l7,72 l7,-27 l7,-0 H320 l16,-13 l16,13 H500 l14,-9 l14,9 H560 l7,7 l7,-52 l7,72 l7,-27 l7,-0 H670 l16,-13 l16,13 H1000"/>
+    </svg>
+
+    <p class="tagline">Um olhar atento sobre quem você ama. Detecta presença, respiração e quedas — sem câmera, sem pulseira.</p>
+
+    <div class="pills">
+      <span class="pill"><span class="dot"></span>Presença por cômodo</span>
+      <span class="pill"><span class="dot"></span>Respiração no sono</span>
+      <span class="pill"><span class="dot"></span>Alerta de queda</span>
+    </div>
+
+    <!-- Acesso ao Monitor (famílias/cuidadores) e ao Painel dos sensores: ambos exigem login em /app -->
+    <a class="enter" href="/app/" aria-label="Acessar o Sentinela Monitor">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 4.6-3.3 8.3-8 9-4.7-.7-8-4.4-8-9V6l8-3z"/><path d="M8 12.5l2.4 2.4L16 9.5"/></svg>
+      <span>Sentinela Monitor<small>acesso para famílias e cuidadores</small></span>
+    </a>
+    <br>
+    <a class="status" href="/app/painel"><span class="live"></span><span class="txt">Painel dos sensores</span></a>
+    <p class="sub">Projeto-piloto em operação · acesso restrito a famílias e cuidadores</p>
+
+    <footer>
+      <a href="https://www.sentineladavida.com.br">sentineladavida.com.br</a>
+      <span class="sep"></span>
+      <span>Rio Claro · SP</span>
+    </footer>
+  </main>
+
+</body>
+</html>

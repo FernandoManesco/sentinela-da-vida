@@ -1,0 +1,47 @@
+<!--
+  app/templates/base.html — layout base de todas as telas do webSentinela (Jinja2).
+  Onde roda: renderizado no notebook da casa por app/main.py (função render) e exibido
+  no navegador.
+  Conexões: os demais templates estendem este (extends base.html) e preenchem os blocos
+  'titulo' e 'conteudo'. Recebe no contexto: usuario (logado ou None), simulado, erro, ok.
+  Carrega /static/style.css.
+-->
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block titulo %}webSentinela{% endblock %}</title>
+  <!-- Folha de estilo única do webSentinela (tema claro/escuro automático) -->
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <!-- Barra superior: só aparece logado; links de administração só para o perfil ADM -->
+  {% if usuario %}
+  <header class="topo">
+    <strong class="marca">webSentinela</strong>
+    <nav>
+      <a href="/painel">Painel</a>
+      {% if usuario.perfil == 'ADM' %}
+      <a href="/usuarios">Usuários</a>
+      <a href="/dispositivos">Dispositivos</a>
+      {% endif %}
+    </nav>
+    <form method="post" action="/logout" class="sair">
+      <span>{{ usuario.nome }} ({{ usuario.perfil }})</span>
+      <button type="submit">Sair</button>
+    </form>
+  </header>
+  {% endif %}
+  <!-- Faixa amarela quando o servidor roda em modo simulado (dados sintéticos) -->
+  {% if simulado %}
+  <div class="aviso">MODO SIMULADO — dados SYNTHETIC, nenhum nó real envolvido.</div>
+  {% endif %}
+  <!-- Mensagens de erro/sucesso vindas das rotas e o conteúdo de cada tela -->
+  <main>
+    {% if erro %}<p class="msg erro">{{ erro }}</p>{% endif %}
+    {% if ok %}<p class="msg ok">{{ ok }}</p>{% endif %}
+    {% block conteudo %}{% endblock %}
+  </main>
+</body>
+</html>

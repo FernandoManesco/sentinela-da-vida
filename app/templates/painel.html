@@ -1,0 +1,27 @@
+{#
+  app/templates/painel.html — Painel dos dispositivos (tela /painel).
+  Onde roda: renderizado por app/main.py e exibido no navegador; depois disso quem
+  manda é o /static/painel.js, via WebSocket /ws.
+  Conexões: estende base.html; recebe 'inicial' (snapshot de app/main.py) embutido
+  como JSON para a primeira pintura.
+  (Cabeçalho em comentário Jinja porque nada pode ser impresso antes do extends.)
+#}
+{% extends "base.html" %}
+{% block titulo %}Painel · webSentinela{% endblock %}
+{% block conteudo %}
+<!-- Título + indicador de conexão do WebSocket (atualizado por painel.js) -->
+<div class="cabecalho">
+  <h1>Painel</h1>
+  <span id="conexao" class="conexao">conectando…</span>
+</div>
+<!-- Cards dos dispositivos e tabela de eventos: preenchidos pelo painel.js -->
+<section id="cards" class="cards"></section>
+<h2>Últimos eventos</h2>
+<table class="tabela">
+  <thead><tr><th>Data/hora</th><th>Dispositivo</th><th>Cômodo</th><th>Evento</th><th>Valor</th></tr></thead>
+  <tbody id="eventos"></tbody>
+</table>
+<!-- Snapshot inicial embutido como JSON (evita tela vazia até o WebSocket abrir) -->
+<script id="dados-iniciais" type="application/json">{{ inicial | tojson }}</script>
+<script src="/static/painel.js"></script>
+{% endblock %}

@@ -1,0 +1,8 @@
+{#
+  app/templates/erro.html — página de erro simples (ex.: 403 para perfil sem permissão).
+  Onde roda: renderizado por app/main.py (função exigir) e exibido no navegador.
+  Conexões: estende base.html; recebe 'mensagem'.
+  (Cabeçalho em comentário Jinja porque nada pode ser impresso antes do extends.)
+#}
+{% extends "base.html" %}
+{% block conteudo %}<p class="msg erro">{{ mensagem }}</p><p><a href="/painel">Voltar ao painel</a></p>{% endblock %}

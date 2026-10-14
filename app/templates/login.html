@@ -1,0 +1,17 @@
+{#
+  app/templates/login.html — formulário de login do webSentinela.
+  Onde roda: renderizado por app/main.py (rotas GET/POST /login) e exibido no navegador.
+  Conexões: estende base.html; o POST vai para /login, que valida com app/auth.py.
+  (Cabeçalho em comentário Jinja porque nada pode ser impresso antes do extends.)
+#}
+{% extends "base.html" %}
+{% block titulo %}Entrar · webSentinela{% endblock %}
+{% block conteudo %}
+<!-- Os campos 'login' e 'senha' casam com os parâmetros Form da rota POST /login -->
+<form method="post" action="/login" class="cartao login">
+  <h1>webSentinela</h1>
+  <label>Login <input name="login" value="{{ login or '' }}" autocomplete="username" required autofocus></label>
+  <label>Senha <input name="senha" type="password" autocomplete="current-password" required></label>
+  <button type="submit">Entrar</button>
+</form>
+{% endblock %}
